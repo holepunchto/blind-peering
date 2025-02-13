@@ -48,14 +48,53 @@ module.exports = class BlindMirroring {
     return pending
   }
 
-  addCoreBackground (core) {
+  addCoreBackground (core, target = core.key) {
     if (core.closing || this.closed || !this.coreMirrors.length) return
+    this._startCoreMirroring(core, target)
+  }
+
+  async _startCoreMirroring (core, target) {
+    try {
+      await core.ready()
+    } catch {
+      return
+    }
+
+    if (core.closing || this.closed) return
+
+    const mirrorKey = getClosestMirror(target || core.key, this.coreMirrors)
+    const ref = this._getMirror(mirrorKey)
+
+    core.on('close', () => {
+      this._releaseMirror(ref)
+    })
+
+    ref.refs++
+
+    try {
+      await ref.mirror.add(core.local.id)
+    } catch {
+      // ignore
+    }
+
+    this._releaseMirror(ref)
   }
 
   addAutobaseBackground (base) {
     if (base.closing || this.closed || !this.autobaseMirrors.length) return
+    this._startAutobaseMirroring(base)
+  }
 
-    const mirrorKey = getClosestMirror(base.key, this.mirrors)
+  async _startAutobaseMirroring (base) {
+    try {
+      await base.ready()
+    } catch {
+      return
+    }
+
+    if (base.closing || this.closed) return
+
+    const mirrorKey = getClosestMirror(base.key, this.autobaseMirrors)
     const ref = this._getMirror(mirrorKey)
 
     this._mirrorBaseBackground(ref, base)
@@ -74,7 +113,6 @@ module.exports = class BlindMirroring {
 
     try {
       await base.ready()
-
       await ref.mirror.add(base.local.id, {
         referrer: base.key,
         autobase: {
