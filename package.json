@@ -1,6 +1,6 @@
 {
   "name": "@holepunchto/blind-mirroring",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Blind mirroring peer side library",
   "main": "index.js",
   "dependencies": {
