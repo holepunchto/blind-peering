@@ -150,6 +150,12 @@ module.exports = class BlindMirroring {
   _gc () {
     const close = []
     for (const ref of this.pendingGC) {
+      const uploaded = getBlocksUploadedTo(ref.mirror.stream)
+      if (uploaded !== ref.uploaded) {
+        ref.uploaded = uploaded
+        ref.gc = ref.gc < 2 ? 1 : ref.gc - 1
+        continue
+      }
       ref.gc++
       // 10 strikes is ~8-10s of inactivity
       if (ref.gc >= 10) close.push(ref)
@@ -169,7 +175,7 @@ module.exports = class BlindMirroring {
     if (!ref) {
       const mirror = new BlindMirrorClient(mirrorKey, { dht: this.swarm.dht, suspended: this.suspended })
       mirror.on('stream', stream => this.store.replicate(stream))
-      ref = { refs: 0, gc: 0, mirror }
+      ref = { refs: 0, gc: 0, uploaded: 0, mirror }
       this.blindMirrorsByKey.set(id, ref)
     }
 
@@ -180,6 +186,15 @@ module.exports = class BlindMirroring {
 
     return ref
   }
+}
+
+function getBlocksUploadedTo (stream) {
+  if (!stream || !stream.userData) return 0
+  let uploadedTotal = 0
+  for (const ch of stream.userData) {
+    if (ch && ch.userData) uploadedTotal += ch.userData.stats.wireData.tx
+  }
+  return uploadedTotal
 }
 
 function getClosestMirror (key, list) {
