@@ -12,6 +12,7 @@ module.exports = class BlindMirroring {
     this.blindMirrorsByKey = new Map()
     this.suspended = false
     this.pendingGC = new Set()
+    this.mirroring = new Set()
     this.gcInterval = null
     this.closed = false
   }
@@ -51,29 +52,35 @@ module.exports = class BlindMirroring {
 
   addCoreBackground (core, target = core.key) {
     if (core.closing || this.closed || !this.coreMirrors.length) return
+    if (this.mirroring.has(core)) return
+
     this._startCoreMirroring(core, target)
   }
 
   async _startCoreMirroring (core, target) {
+    this.mirroring.add(core)
+
     try {
       await core.ready()
-    } catch {
+    } catch {}
+
+    if (!core.opened || core.closing || this.closed) {
+      this.mirroring.delete(core)
       return
     }
-
-    if (core.closing || this.closed) return
 
     const mirrorKey = getClosestMirror(target || core.key, this.coreMirrors)
     const ref = this._getMirror(mirrorKey)
 
     core.on('close', () => {
+      this.mirroring.delete(core)
       this._releaseMirror(ref)
     })
 
     ref.refs++
 
     try {
-      await ref.mirror.add(core.local.id)
+      await ref.mirror.add(core.id)
     } catch {
       // ignore
     }
@@ -83,17 +90,21 @@ module.exports = class BlindMirroring {
 
   addAutobaseBackground (base) {
     if (base.closing || this.closed || !this.autobaseMirrors.length) return
+    if (this.mirroring.has(base)) return
+
     this._startAutobaseMirroring(base)
   }
 
   async _startAutobaseMirroring (base) {
+    this.mirroring.add(base)
+
     try {
       await base.ready()
-    } catch {
-      return
-    }
+    } catch {}
 
-    if (base.closing || this.closed) return
+    if (!base.opened || base.closing || this.closed) {
+      this.mirroring.delete(base)
+    }
 
     const mirrorKey = getClosestMirror(base.key, this.autobaseMirrors)
     const ref = this._getMirror(mirrorKey)
@@ -105,6 +116,7 @@ module.exports = class BlindMirroring {
     })
 
     base.on('close', () => {
+      this.mirroring.delete(base)
       this._releaseMirror(ref)
     })
   }
