@@ -1,6 +1,6 @@
-const BlindMirrorClient = require('@holepunchto/blind-mirror/client')
 const xorDistance = require('xor-distance')
 const b4a = require('b4a')
+const BlindMirrorClient = require('./lib/client.js')
 
 module.exports = class BlindMirroring {
   constructor (swarm, store, { mirrors = [], mediaMirrors = [], autobaseMirrors = mirrors, coreMirrors = mediaMirrors }) {
