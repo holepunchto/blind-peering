@@ -192,7 +192,8 @@ function getBlocksUploadedTo (stream) {
   if (!stream || !stream.userData) return 0
   let uploadedTotal = 0
   for (const ch of stream.userData) {
-    if (ch && ch.userData) uploadedTotal += ch.userData.stats.wireData.tx
+    if (!ch || !ch.userData || !ch.userData.wireData) continue
+    uploadedTotal += ch.userData.stats.wireData.tx
   }
   return uploadedTotal
 }
