@@ -1,13 +1,14 @@
 const xorDistance = require('xor-distance')
 const b4a = require('b4a')
 const BlindMirrorClient = require('./lib/client.js')
+const HypercoreId = require('hypercore-id-encoding')
 
 module.exports = class BlindMirroring {
   constructor (swarm, store, { mirrors = [], mediaMirrors = [], autobaseMirrors = mirrors, coreMirrors = mediaMirrors }) {
     this.swarm = swarm
     this.store = store
-    this.autobaseMirrors = autobaseMirrors
-    this.coreMirrors = coreMirrors
+    this.autobaseMirrors = autobaseMirrors.map(HypercoreId.decode)
+    this.coreMirrors = coreMirrors.map(HypercoreId.decode)
     this.blindMirrorsByKey = new Map()
     this.suspended = false
     this.pendingGC = new Set()
@@ -157,8 +158,8 @@ module.exports = class BlindMirroring {
         continue
       }
       ref.gc++
-      // 10 strikes is ~8-10s of inactivity
-      if (ref.gc >= 10) close.push(ref)
+      // 10 strikes is ~4-8s of inactivity
+      if (ref.gc >= 4) close.push(ref)
     }
 
     for (const ref of close) {
@@ -208,7 +209,7 @@ function getClosestMirror (key, list) {
     const next = xorDistance(list[i], key)
     if (current && xorDistance.gt(next, current)) continue
     current = next
-    result = key
+    result = list[i]
   }
 
   return result
