@@ -1,12 +1,12 @@
-# blind-mirroring
+# blind-peering
 
 ```
-npm install @holepunchto/blind-mirroring
+npm install @holepunchto/blind-peering
 ```
 
 ## Usage
 
 ``` js
-// TODO
+// TODO see index.js
 ```
 
