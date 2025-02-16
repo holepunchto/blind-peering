@@ -80,7 +80,7 @@ module.exports = class BlindMirroring {
     ref.refs++
 
     try {
-      await ref.mirror.add(core.id)
+      await ref.mirror.addCore(core.key)
     } catch {
       // ignore
     }
@@ -121,12 +121,26 @@ module.exports = class BlindMirroring {
     })
   }
 
+  postToMailboxBackground (publicKey, msg) {
+    this.postToMailbox(publicKey, msg).catch(noop)
+  }
+
+  async postToMailbox (publicKey, msg) {
+    const ref = this._getMirror(publicKey)
+
+    try {
+      await ref.mirror.postToMailbox(msg)
+    } finally {
+      this._releaseMirror(ref)
+    }
+  }
+
   async _mirrorBaseBackground (ref, base) {
     ref.refs++
 
     try {
       await base.ready()
-      await ref.mirror.add(base.local.id, {
+      await ref.mirror.addCore(base.local.key, {
         referrer: base.key,
         autobase: {
           // the system core is blinded as well, but we share the block key to the mirror can warmup the clock
