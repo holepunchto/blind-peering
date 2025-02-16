@@ -1,7 +1,7 @@
 {
-  "name": "@holepunchto/blind-mirroring",
+  "name": "@holepunchto/blind-peering",
   "version": "1.1.4",
-  "description": "Blind mirroring peer side library",
+  "description": "Blind peering library",
   "main": "index.js",
   "dependencies": {
     "b4a": "^1.6.7",
@@ -14,11 +14,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/holepunchto/blind-mirroring.git"
+    "url": "https://github.com/holepunchto/blind-peering.git"
   },
   "author": "Holepunch Inc",
   "bugs": {
-    "url": "https://github.com/holepunchto/blind-mirroring/issues"
+    "url": "https://github.com/holepunchto/blind-peering/issues"
   },
-  "homepage": "https://github.com/holepunchto/blind-mirroring"
+  "homepage": "https://github.com/holepunchto/blind-peering"
 }

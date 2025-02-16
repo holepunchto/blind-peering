@@ -1,6 +1,6 @@
 const xorDistance = require('xor-distance')
 const b4a = require('b4a')
-const BlindMirrorClient = require('./lib/client.js')
+const BlindPeerClient = require('./lib/client.js')
 const HypercoreId = require('hypercore-id-encoding')
 
 module.exports = class BlindMirroring {
@@ -9,7 +9,7 @@ module.exports = class BlindMirroring {
     this.store = store
     this.autobaseMirrors = autobaseMirrors.map(HypercoreId.decode)
     this.coreMirrors = coreMirrors.map(HypercoreId.decode)
-    this.blindMirrorsByKey = new Map()
+    this.blindPeersByKey = new Map()
     this.suspended = false
     this.pendingGC = new Set()
     this.mirroring = new Set()
@@ -22,8 +22,8 @@ module.exports = class BlindMirroring {
     this._stopGC()
 
     const suspending = []
-    for (const ref of this.blindMirrorsByKey.values()) {
-      suspending.push(ref.mirror.suspend())
+    for (const ref of this.blindPeersByKey.values()) {
+      suspending.push(ref.peer.suspend())
     }
     return Promise.all(suspending)
   }
@@ -33,8 +33,8 @@ module.exports = class BlindMirroring {
     if (this.pendingGC.size) this._startGC()
 
     const resuming = []
-    for (const ref of this.blindMirrorsByKey.values()) {
-      resuming.push(ref.mirror.resume())
+    for (const ref of this.blindPeersByKey.values()) {
+      resuming.push(ref.peer.resume())
     }
     return Promise.all(resuming)
   }
@@ -44,8 +44,8 @@ module.exports = class BlindMirroring {
     this._stopGC()
 
     const pending = []
-    for (const ref of this.blindMirrorsByKey.values()) {
-      pending.push(ref.mirror.close())
+    for (const ref of this.blindPeersByKey.values()) {
+      pending.push(ref.peer.close())
     }
     return pending
   }
@@ -70,7 +70,7 @@ module.exports = class BlindMirroring {
     }
 
     const mirrorKey = getClosestMirror(target || core.key, this.coreMirrors)
-    const ref = this._getMirror(mirrorKey)
+    const ref = this._getBlindPeer(mirrorKey)
 
     core.on('close', () => {
       this.mirroring.delete(core)
@@ -80,7 +80,7 @@ module.exports = class BlindMirroring {
     ref.refs++
 
     try {
-      await ref.mirror.addCore(core.key)
+      await ref.peer.addCore(core.key)
     } catch {
       // ignore
     }
@@ -107,7 +107,7 @@ module.exports = class BlindMirroring {
     }
 
     const mirrorKey = getClosestMirror(base.key, this.autobaseMirrors)
-    const ref = this._getMirror(mirrorKey)
+    const ref = this._getBlindPeer(mirrorKey)
 
     this._mirrorBaseBackground(ref, base)
 
@@ -121,39 +121,39 @@ module.exports = class BlindMirroring {
     })
   }
 
-  postToMailboxBackground (publicKey, msg) {
-    this.postToMailbox(publicKey, msg).catch(noop)
-  }
-
-  async postToMailbox (publicKey, msg) {
-    const ref = this._getMirror(publicKey)
-
-    try {
-      await ref.mirror.postToMailbox(msg)
-    } finally {
-      this._releaseMirror(ref)
-    }
-  }
-
   async _mirrorBaseBackground (ref, base) {
     ref.refs++
 
     try {
       await base.ready()
-      await ref.mirror.addCore(base.local.key, {
-        referrer: base.key,
-        autobase: {
-          // the system core is blinded as well, but we share the block key to the mirror can warmup the clock
-          // this is a feature, as we let the mirror know related cores - thats it
-          key: base.core.key,
-          blockEncryptionKey: base.core.encryption.blockKey
-        }
-      })
+      if (base.closing) return
+
+      const promises = []
+      promises.push(ref.peer.addCore(base.local.key, { referrer: base.key, priority: 1 }))
+      for (const view of base.system.views) {
+        promises.push(ref.peer.addCore(view.key, { referrer: base.key, priority: 1 }))
+      }
+
+      await Promise.all(promises)
     } catch {
       // ignore
     }
 
     this._releaseMirror(ref)
+  }
+
+  postToMailboxBackground (publicKey, msg) {
+    this.postToMailbox(publicKey, msg).catch(noop)
+  }
+
+  async postToMailbox (publicKey, msg) {
+    const ref = this._getBlindPeer(publicKey)
+
+    try {
+      await ref.peer.postToMailbox(msg)
+    } finally {
+      this._releaseMirror(ref)
+    }
   }
 
   _releaseMirror (ref) {
@@ -177,7 +177,7 @@ module.exports = class BlindMirroring {
   _gc () {
     const close = []
     for (const ref of this.pendingGC) {
-      const uploaded = getBlocksUploadedTo(ref.mirror.stream)
+      const uploaded = getBlocksUploadedTo(ref.peer.stream)
       if (uploaded !== ref.uploaded) {
         ref.uploaded = uploaded
         ref.gc = ref.gc < 2 ? 1 : ref.gc - 1
@@ -189,21 +189,21 @@ module.exports = class BlindMirroring {
     }
 
     for (const ref of close) {
-      ref.mirror.close().catch(noop)
+      ref.peer.close().catch(noop)
       this.pendingGC.delete(ref)
     }
   }
 
-  _getMirror (mirrorKey) {
+  _getBlindPeer (mirrorKey) {
     const id = b4a.toString(mirrorKey, 'hex')
 
-    let ref = this.blindMirrorsByKey.get(id)
+    let ref = this.blindPeersByKey.get(id)
 
     if (!ref) {
-      const mirror = new BlindMirrorClient(mirrorKey, { dht: this.swarm.dht, suspended: this.suspended })
-      mirror.on('stream', stream => this.store.replicate(stream))
-      ref = { refs: 0, gc: 0, uploaded: 0, mirror }
-      this.blindMirrorsByKey.set(id, ref)
+      const peer = new BlindPeerClient(mirrorKey, { dht: this.swarm.dht, suspended: this.suspended })
+      peer.on('stream', stream => this.store.replicate(stream))
+      ref = { refs: 0, gc: 0, uploaded: 0, peer }
+      this.blindPeersByKey.set(id, ref)
     }
 
     if (ref.gc) this.pendingGC.delete(ref)
