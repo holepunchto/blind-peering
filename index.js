@@ -47,7 +47,7 @@ module.exports = class BlindMirroring {
     for (const ref of this.blindPeersByKey.values()) {
       pending.push(ref.peer.close())
     }
-    return pending
+    return Promise.all(pending)
   }
 
   addCoreBackground (core, target = core.key) {
@@ -169,6 +169,7 @@ module.exports = class BlindMirroring {
   }
 
   _startGC () {
+    if (this.closed) return
     if (!this.gcInterval) {
       this.gcInterval = setInterval(this._gc.bind(this), 2000)
     }
