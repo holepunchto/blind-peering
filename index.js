@@ -201,7 +201,7 @@ module.exports = class BlindMirroring {
     let ref = this.blindPeersByKey.get(id)
 
     if (!ref) {
-      const peer = new BlindPeerClient(mirrorKey, { dht: this.swarm.dht, suspended: this.suspended })
+      const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, { suspended: this.suspended })
       peer.on('stream', stream => this.store.replicate(stream))
       ref = { refs: 0, gc: 0, uploaded: 0, peer }
       this.blindPeersByKey.set(id, ref)
