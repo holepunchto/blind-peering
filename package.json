@@ -11,7 +11,7 @@
     "compact-encoding": "^2.16.0",
     "hypercore-id-encoding": "^1.3.0",
     "protomux-rpc": "^1.7.0",
-    "protomux-rpc-client": "holepunchto/protomux-rpc-client",
+    "protomux-rpc-client": "^1.0.0",
     "ready-resource": "^1.1.2",
     "safety-catch": "^1.0.2",
     "xor-distance": "^2.0.0"
