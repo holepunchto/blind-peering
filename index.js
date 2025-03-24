@@ -50,14 +50,14 @@ module.exports = class BlindMirroring {
     return Promise.all(pending)
   }
 
-  addCoreBackground (core, target = core.key) {
+  addCoreBackground (core, target = core.key, { announce = false } = {}) {
     if (core.closing || this.closed || !this.coreMirrors.length) return
     if (this.mirroring.has(core)) return
 
-    this._startCoreMirroring(core, target)
+    this._startCoreMirroring(core, target, { announce })
   }
 
-  async _startCoreMirroring (core, target) {
+  async _startCoreMirroring (core, target, { announce }) {
     this.mirroring.add(core)
 
     try {
@@ -80,7 +80,7 @@ module.exports = class BlindMirroring {
     ref.refs++
 
     try {
-      await ref.peer.addCore(core.key)
+      await ref.peer.addCore(core.key, { announce })
     } catch {
       // ignore
     }
