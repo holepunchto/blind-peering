@@ -1,7 +1,9 @@
 const xorDistance = require('xor-distance')
 const b4a = require('b4a')
-const BlindPeerClient = require('./lib/client.js')
 const HypercoreId = require('hypercore-id-encoding')
+const safetyCatch = require('safety-catch')
+
+const BlindPeerClient = require('./lib/client.js')
 
 module.exports = class BlindMirroring {
   constructor (swarm, store, { mirrors = [], mediaMirrors = [], autobaseMirrors = mirrors, coreMirrors = mediaMirrors }) {
@@ -57,12 +59,21 @@ module.exports = class BlindMirroring {
     this._startCoreMirroring(core, target, { announce })
   }
 
+  async addCore (core, target = core.key, { announce = false } = {}) {
+    if (core.closing || this.closed || !this.coreMirrors.length) return
+    if (this.mirroring.has(core)) return null
+
+    return await this._startCoreMirroring(core, target, { announce })
+  }
+
   async _startCoreMirroring (core, target, { announce }) {
     this.mirroring.add(core)
 
     try {
       await core.ready()
-    } catch {}
+    } catch (e) {
+      safetyCatch(e)
+    }
 
     if (!core.opened || core.closing || this.closed) {
       this.mirroring.delete(core)
@@ -80,12 +91,13 @@ module.exports = class BlindMirroring {
     ref.refs++
 
     try {
-      await ref.peer.addCore(core.key, { announce })
-    } catch {
+      return await ref.peer.addCore(core.key, { announce })
+    } catch (e) {
+      safetyCatch(e)
       // ignore
+    } finally {
+      this._releaseMirror(ref)
     }
-
-    this._releaseMirror(ref)
   }
 
   addAutobaseBackground (base) {
