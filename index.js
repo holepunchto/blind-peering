@@ -59,9 +59,7 @@ module.exports = class BlindMirroring {
     this._startCoreMirroring(core, target, { announce })
   }
 
-  async addCore (coreKey, target = coreKey, { announce = false } = {}) {
-    coreKey = HypercoreId.decode(coreKey)
-    const core = this.store.get({ key: coreKey })
+  async addCore (core, target = core.key, { announce = false } = {}) {
     if (core.closing || this.closed || !this.coreMirrors.length) return
     if (this.mirroring.has(core)) return null
 
