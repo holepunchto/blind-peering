@@ -6,6 +6,10 @@
   "scripts": {
     "test": "standard"
   },
+  "files": [
+    "lib/",
+    "index.js"
+  ],
   "dependencies": {
     "b4a": "^1.6.7",
     "blind-peer-encodings": "^3.0.0",
