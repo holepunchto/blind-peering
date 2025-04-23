@@ -52,18 +52,20 @@ module.exports = class BlindMirroring {
     return Promise.all(pending)
   }
 
-  addCoreBackground (core, target = core.key, { announce = false } = {}) {
+  addCoreBackground (core, target = core.key, opts = {}) {
     if (core.closing || this.closed || !this.coreMirrors.length) return
-    if (this.mirroring.has(core)) return
+    if (this.mirroring.has(core)) return // Note: we do not consider the case where the options changed at the moment
+    opts.announce = opts.announce === true
 
-    this._startCoreMirroring(core, target, { announce })
+    this._startCoreMirroring(core, target, opts)
   }
 
-  async addCore (core, target = core.key, { announce = false } = {}) {
+  async addCore (core, target = core.key, opts = {}) {
     if (core.closing || this.closed || !this.coreMirrors.length) return
-    if (this.mirroring.has(core)) return null
+    if (this.mirroring.has(core)) return null // Note: we do not consider the case where the options changed at the moment
+    opts.announce = opts.announce === true
 
-    return await this._startCoreMirroring(core, target, { announce })
+    return await this._startCoreMirroring(core, target, opts)
   }
 
   async _startCoreMirroring (core, target, { announce }) {
