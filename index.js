@@ -68,7 +68,7 @@ module.exports = class BlindMirroring {
     return await this._startCoreMirroring(core, target, opts)
   }
 
-  async _startCoreMirroring (core, target, { announce }) {
+  async _startCoreMirroring (core, target, opts) {
     this.mirroring.add(core)
 
     try {
@@ -93,7 +93,7 @@ module.exports = class BlindMirroring {
     ref.refs++
 
     try {
-      return await ref.peer.addCore(core.key, { announce })
+      return await ref.peer.addCore(core.key, opts)
     } catch (e) {
       safetyCatch(e)
       // ignore
