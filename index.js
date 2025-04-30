@@ -5,10 +5,11 @@ const safetyCatch = require('safety-catch')
 
 const BlindPeerClient = require('./lib/client.js')
 
-module.exports = class BlindMirroring {
-  constructor (swarm, store, { mirrors = [], mediaMirrors = [], autobaseMirrors = mirrors, coreMirrors = mediaMirrors }) {
+module.exports = class BlindPeering {
+  constructor (swarm, store, { wakeup = null, mirrors = [], mediaMirrors = [], autobaseMirrors = mirrors, coreMirrors = mediaMirrors }) {
     this.swarm = swarm
     this.store = store
+    this.wakeup = wakeup
     this.autobaseMirrors = autobaseMirrors.map(HypercoreId.decode)
     this.coreMirrors = coreMirrors.map(HypercoreId.decode)
     this.blindPeersByKey = new Map()
@@ -140,12 +141,14 @@ module.exports = class BlindMirroring {
       await base.ready()
       if (base.closing) return
 
+      const referrer = base.wakeupCapability.key
+
       const promises = []
-      promises.push(ref.peer.addCore(base.local.key, { referrer: base.key, priority: 1 }))
+      promises.push(ref.peer.addCore(base.local.key, { referrer, priority: 1 }))
       // add system core if not the empty core
-      if (base.core.length) promises.push(ref.peer.addCore(base.core.key, { referrer: base.key, priority: 1 }))
+      if (base.core.length) promises.push(ref.peer.addCore(base.core.key, { referrer, priority: 1 }))
       for (const view of base.system.views) {
-        promises.push(ref.peer.addCore(view.key, { referrer: base.key, priority: 1 }))
+        promises.push(ref.peer.addCore(view.key, { referrer, priority: 1 }))
       }
 
       await Promise.all(promises)
@@ -216,7 +219,10 @@ module.exports = class BlindMirroring {
 
     if (!ref) {
       const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, { suspended: this.suspended })
-      peer.on('stream', stream => this.store.replicate(stream))
+      peer.on('stream', stream => {
+        this.store.replicate(stream)
+        if (this.wakeup) this.wakeup.addStream(stream)
+      })
       ref = { refs: 0, gc: 0, uploaded: 0, peer }
       this.blindPeersByKey.set(id, ref)
     }
