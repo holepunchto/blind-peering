@@ -145,10 +145,8 @@ module.exports = class BlindPeering {
 
       const promises = []
       promises.push(ref.peer.addCore(base.local.key, { referrer, priority: 1 }))
-      // add system core if not the empty core
-      if (base.core.length) promises.push(ref.peer.addCore(base.core.key, { referrer, priority: 1 }))
-      for (const view of base.system.views) {
-        promises.push(ref.peer.addCore(view.key, { referrer, priority: 1 }))
+      for (const view of base.views()) {
+        promises.push(ref.peer.addCore(view.key, { referrer: null, priority: 1 }))
       }
 
       await Promise.all(promises)
