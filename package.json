@@ -1,6 +1,6 @@
 {
   "name": "@holepunchto/blind-peering",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Blind peering library",
   "main": "index.js",
   "scripts": {
