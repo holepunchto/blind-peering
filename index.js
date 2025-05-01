@@ -6,14 +6,14 @@ const safetyCatch = require('safety-catch')
 const BlindPeerClient = require('./lib/client.js')
 
 module.exports = class BlindPeering {
-  constructor (swarm, store, { wakeup = null, mirrors = [], mediaMirrors = [], autobaseMirrors = mirrors, coreMirrors = mediaMirrors }) {
+  constructor (swarm, store, { suspended = false, wakeup = null, mirrors = [], mediaMirrors = [], autobaseMirrors = mirrors, coreMirrors = mediaMirrors }) {
     this.swarm = swarm
     this.store = store
     this.wakeup = wakeup
     this.autobaseMirrors = autobaseMirrors.map(HypercoreId.decode)
     this.coreMirrors = coreMirrors.map(HypercoreId.decode)
     this.blindPeersByKey = new Map()
-    this.suspended = false
+    this.suspended = suspended
     this.pendingGC = new Set()
     this.mirroring = new Set()
     this.gcInterval = null
