@@ -5,7 +5,7 @@ Client for interacting with [blind peers](https://github.com/holepunchto/blind-p
 ## Installl
 
 ```
-npm install blind-peering
+npm install @holepunchto/blind-peering
 ```
 
 ## API

@@ -1,5 +1,5 @@
 {
-  "name": "blind-peering",
+  "name": "@holepunchto/blind-peering",
   "version": "1.6.1",
   "description": "Request blind peers to keep hypercores and autobases available",
   "main": "index.js",
