@@ -12,7 +12,8 @@ module.exports = class BlindPeering {
     mirrors = [],
     mediaMirrors = mirrors,
     autobaseMirrors = mirrors,
-    coreMirrors = mediaMirrors
+    coreMirrors = mediaMirrors,
+    gcIntervalMs = 2000
   }) {
     this.swarm = swarm
     this.store = store
@@ -21,6 +22,7 @@ module.exports = class BlindPeering {
     this.coreMirrors = coreMirrors.map(HypercoreId.decode)
     this.blindPeersByKey = new Map()
     this.suspended = suspended
+    this.gcIntervalMs = gcIntervalMs
     this.pendingGC = new Set()
     this.mirroring = new Set()
     this.gcInterval = null
@@ -212,7 +214,7 @@ module.exports = class BlindPeering {
   _startGC () {
     if (this.closed) return
     if (!this.gcInterval) {
-      this.gcInterval = setInterval(this._gc.bind(this), 2000)
+      this.gcInterval = setInterval(this._gc.bind(this), this.gcIntervalMs)
     }
   }
 
