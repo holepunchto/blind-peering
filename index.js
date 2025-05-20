@@ -70,8 +70,8 @@ module.exports = class BlindPeering {
   }
 
   async addCore (core, target = core.key, { announce = false, referrer = null, priority = 0, mirrors = 1 } = {}) {
-    if (core.closing || this.closed || !this.coreMirrors.length) return
-    if (this.mirroring.has(core)) return null
+    if (core.closing || this.closed || !this.coreMirrors.length) return []
+    if (this.mirroring.has(core)) return []
 
     return await this._startCoreMirroring(core, target, announce, referrer, priority, mirrors)
   }
@@ -87,13 +87,13 @@ module.exports = class BlindPeering {
 
     if (!core.opened || core.closing || this.closed) {
       this.mirroring.delete(core)
-      return
+      return []
     }
 
     if (!target) target = core.key
 
     if (mirrors === 1) { // easy case
-      return this._mirrorCore(getClosestMirror(target, this.coreMirrors), core, announce, referrer, priority)
+      return [await this._mirrorCore(getClosestMirror(target, this.coreMirrors), core, announce, referrer, priority)]
     }
 
     const all = []
@@ -116,7 +116,7 @@ module.exports = class BlindPeering {
     ref.refs++
 
     try {
-      await ref.peer.addCore(core.key, { announce, referrer, priority })
+      return await ref.peer.addCore(core.key, { announce, referrer, priority })
     } catch (e) {
       safetyCatch(e)
       // ignore
