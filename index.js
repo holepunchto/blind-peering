@@ -13,7 +13,8 @@ module.exports = class BlindPeering {
     mediaMirrors = mirrors,
     autobaseMirrors = mirrors,
     coreMirrors = mediaMirrors,
-    gcWait = 2000
+    gcWait = 2000,
+    relayThrough = null
   }) {
     this.swarm = swarm
     this.store = store
@@ -27,6 +28,7 @@ module.exports = class BlindPeering {
     this.mirroring = new Set()
     this.gcInterval = null
     this.closed = false
+    this.relayThrough = relayThrough
   }
 
   suspend () {
@@ -246,7 +248,7 @@ module.exports = class BlindPeering {
     let ref = this.blindPeersByKey.get(id)
 
     if (!ref) {
-      const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, { suspended: this.suspended })
+      const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, { suspended: this.suspended, relayThrough: this.relayThrough })
       peer.on('stream', stream => {
         this.store.replicate(stream)
         if (this.wakeup) this.wakeup.addStream(stream)
