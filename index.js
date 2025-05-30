@@ -158,10 +158,30 @@ module.exports = class BlindPeering {
       this._mirrorBaseBackground(ref, base)
     })
 
+    base.on('writer', (writer) => {
+      if (!isStaticCore(writer.core)) return
+      this._mirrorBaseWriterBackground(ref, base, writer.core)
+    })
+
     base.on('close', () => {
       this.mirroring.delete(base)
       this._releaseMirror(ref)
     })
+  }
+
+  async _mirrorBaseWriterBackground (ref, base, core) {
+    ref.refs++
+
+    const referrer = base.wakeupCapability.key
+
+    try {
+      return await ref.peer.addCore(core.key, { announce: false, referrer, priority: 1 })
+    } catch (e) {
+      safetyCatch(e)
+      // ignore
+    } finally {
+      this._releaseMirror(ref)
+    }
   }
 
   async _mirrorBaseBackground (ref, base) {
@@ -174,7 +194,14 @@ module.exports = class BlindPeering {
       const referrer = base.wakeupCapability.key
 
       const promises = []
+
       promises.push(ref.peer.addCore(base.local.key, { announce: false, referrer, priority: 1 }))
+
+      for (const writer of base.activeWriters) {
+        if (!isStaticCore(writer.core)) continue
+        promises.push(ref.peer.addCore(writer.core.key, { announce: false, referrer, priority: 1 }))
+      }
+
       for (const view of base.views()) {
         promises.push(ref.peer.addCore(view.key, { announce: false, referrer: null, priority: 1 }))
       }
@@ -310,6 +337,10 @@ function getClosestMirror (key, list) {
   }
 
   return result
+}
+
+function isStaticCore (core) {
+  return !!core.manifest && core.manifest.signers.length === 0
 }
 
 function noop () {}
