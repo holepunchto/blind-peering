@@ -1,5 +1,5 @@
 {
-  "name": "@holepunchto/blind-peering",
+  "name": "blind-peering",
   "version": "1.7.0",
   "description": "Request blind peers to keep hypercores and autobases available",
   "main": "index.js",
@@ -26,6 +26,7 @@
     "url": "https://github.com/holepunchto/blind-peering.git"
   },
   "author": "Holepunch Inc",
+  "license": "Apache-2.0",
   "bugs": {
     "url": "https://github.com/holepunchto/blind-peering/issues"
   },
