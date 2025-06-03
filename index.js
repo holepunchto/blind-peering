@@ -127,14 +127,14 @@ module.exports = class BlindPeering {
     }
   }
 
-  addAutobaseBackground (base, target = (base.wakeupCapability && base.wakeupCapability.key)) {
+  addAutobaseBackground (base, target = (base.wakeupCapability && base.wakeupCapability.key), { all = false } = {}) {
     if (base.closing || this.closed || !this.autobaseMirrors.length) return
     if (this.mirroring.has(base)) return
 
-    this._startAutobaseMirroring(base, target)
+    this._startAutobaseMirroring(base, target, all)
   }
 
-  async _startAutobaseMirroring (base, target) {
+  async _startAutobaseMirroring (base, target, all) {
     this.mirroring.add(base)
 
     try {
@@ -152,14 +152,14 @@ module.exports = class BlindPeering {
 
     const ref = this._getBlindPeer(mirrorKey)
 
-    this._mirrorBaseBackground(ref, base)
+    this._mirrorBaseBackground(ref, base, all)
 
     base.core.on('migrate', () => {
-      this._mirrorBaseBackground(ref, base)
+      this._mirrorBaseBackground(ref, base, all)
     })
 
     base.on('writer', (writer) => {
-      if (!isStaticCore(writer.core)) return
+      if (!isStaticCore(writer.core) && !all) return
       this._mirrorBaseWriterBackground(ref, base, writer.core)
     })
 
@@ -184,7 +184,7 @@ module.exports = class BlindPeering {
     }
   }
 
-  async _mirrorBaseBackground (ref, base) {
+  async _mirrorBaseBackground (ref, base, all) {
     ref.refs++
 
     try {
@@ -198,7 +198,7 @@ module.exports = class BlindPeering {
       promises.push(ref.peer.addCore(base.local.key, { announce: false, referrer, priority: 1 }))
 
       for (const writer of base.activeWriters) {
-        if (!isStaticCore(writer.core)) continue
+        if (!isStaticCore(writer.core) && !all) continue
         promises.push(ref.peer.addCore(writer.core.key, { announce: false, referrer, priority: 1 }))
       }
 
