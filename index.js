@@ -134,6 +134,13 @@ module.exports = class BlindPeering {
     this._startAutobaseMirroring(base, target, all)
   }
 
+  async addAutobase (base, target = (base.wakeupCapability && base.wakeupCapability.key), { all = false } = {}) {
+    if (base.closing || this.closed || !this.autobaseMirrors.length) return
+    if (this.mirroring.has(base)) return
+
+    return this._startAutobaseMirroring(base, target, all)
+  }
+
   async _startAutobaseMirroring (base, target, all) {
     this.mirroring.add(base)
 
@@ -152,8 +159,6 @@ module.exports = class BlindPeering {
 
     const ref = this._getBlindPeer(mirrorKey)
 
-    this._mirrorBaseBackground(ref, base, all)
-
     base.core.on('migrate', () => {
       this._mirrorBaseBackground(ref, base, all)
     })
@@ -167,6 +172,8 @@ module.exports = class BlindPeering {
       this.mirroring.delete(base)
       this._releaseMirror(ref)
     })
+
+    return this._mirrorBaseBackground(ref, base, all)
   }
 
   async _mirrorBaseWriterBackground (ref, base, core) {
