@@ -14,7 +14,8 @@ module.exports = class BlindPeering {
     autobaseMirrors = mirrors,
     coreMirrors = mediaMirrors,
     gcWait = 2000,
-    relayThrough = null
+    relayThrough = null,
+    passive = false
   }) {
     this.swarm = swarm
     this.store = store
@@ -29,6 +30,7 @@ module.exports = class BlindPeering {
     this.gcInterval = null
     this.closed = false
     this.relayThrough = relayThrough
+    this.passive = passive
   }
 
   suspend () {
@@ -118,7 +120,7 @@ module.exports = class BlindPeering {
     ref.refs++
 
     try {
-      return await ref.peer.addCore(core.key, { announce, referrer, priority })
+      return this.passive ? await ref.peer.connect() : await ref.peer.addCore(core.key, { announce, referrer, priority })
     } catch (e) {
       safetyCatch(e)
       // ignore
@@ -182,7 +184,9 @@ module.exports = class BlindPeering {
     const referrer = base.wakeupCapability.key
 
     try {
-      return await ref.peer.addCore(core.key, { announce: false, referrer, priority: 1 })
+      return this.passive
+        ? await ref.peer.connect()
+        : await ref.peer.addCore(core.key, { announce: false, referrer, priority: 1 })
     } catch (e) {
       safetyCatch(e)
       // ignore
@@ -191,29 +195,33 @@ module.exports = class BlindPeering {
     }
   }
 
+  _addBaseCores (ref, base, all) {
+    if (this.passive) return Promise.all([ref.peer.connect()])
+
+    const referrer = base.wakeupCapability.key
+    const promises = []
+
+    promises.push(ref.peer.addCore(base.local.key, { announce: false, referrer, priority: 1 }))
+
+    for (const writer of base.activeWriters) {
+      if (!isStaticCore(writer.core) && !all) continue
+      promises.push(ref.peer.addCore(writer.core.key, { announce: false, referrer, priority: 1 }))
+    }
+
+    for (const view of base.views()) {
+      promises.push(ref.peer.addCore(view.key, { announce: false, referrer: null, priority: 1 }))
+    }
+
+    return Promise.all(promises)
+  }
+
   async _mirrorBaseBackground (ref, base, all) {
     ref.refs++
 
     try {
       await base.ready()
       if (base.closing) return
-
-      const referrer = base.wakeupCapability.key
-
-      const promises = []
-
-      promises.push(ref.peer.addCore(base.local.key, { announce: false, referrer, priority: 1 }))
-
-      for (const writer of base.activeWriters) {
-        if (!isStaticCore(writer.core) && !all) continue
-        promises.push(ref.peer.addCore(writer.core.key, { announce: false, referrer, priority: 1 }))
-      }
-
-      for (const view of base.views()) {
-        promises.push(ref.peer.addCore(view.key, { announce: false, referrer: null, priority: 1 }))
-      }
-
-      await Promise.all(promises)
+      await this._addBaseCores(ref, base, all)
     } catch {
       // ignore
     }
