@@ -19,7 +19,7 @@ Create a new Blind Peering instance. `swarm` is a hyperswarm instance and `store
 - `suspended`: whether to start in suspended state (default `false`)
 - `wakeup`: a Wakeup object
 
-#### `await blindPeering.addCore (core, target = core.key, opts)`
+#### `await blindPeering.addCore(core, target = core.key, opts)`
 
 Add a Hypercore to a blind peer.
 
