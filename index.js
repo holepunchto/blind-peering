@@ -70,7 +70,7 @@ module.exports = class BlindPeering {
     if (core.closing || this.closed || !this.coreMirrors.length) return
     if (this.mirroring.has(core)) return
 
-    this._startCoreMirroring(core, target, announce, referrer, priority, mirrors)
+    this._startCoreMirroring(core, target, announce, referrer, priority, mirrors).catch(safetyCatch)
   }
 
   async addCore (core, target = core.key, { announce = false, referrer = null, priority = 0, mirrors = 1 } = {}) {
@@ -162,12 +162,12 @@ module.exports = class BlindPeering {
     const ref = this._getBlindPeer(mirrorKey)
 
     base.core.on('migrate', () => {
-      this._mirrorBaseBackground(ref, base, all)
+      this._mirrorBaseBackground(ref, base, all).catch(safetyCatch)
     })
 
     base.on('writer', (writer) => {
       if (!isStaticCore(writer.core) && !all) return
-      this._mirrorBaseWriterBackground(ref, base, writer.core)
+      this._mirrorBaseWriterBackground(ref, base, writer.core).catch(safetyCatch)
     })
 
     base.on('close', () => {
