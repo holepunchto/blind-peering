@@ -63,6 +63,7 @@ module.exports = class BlindPeering {
     for (const ref of this.blindPeersByKey.values()) {
       pending.push(ref.peer.close())
     }
+
     return Promise.all(pending)
   }
 
@@ -155,6 +156,7 @@ module.exports = class BlindPeering {
 
     if (!base.opened || base.closing || this.closed) {
       this.mirroring.delete(base)
+      return
     }
 
     if (!target) target = base.wakeupCapability.key
