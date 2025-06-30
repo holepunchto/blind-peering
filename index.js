@@ -148,7 +148,10 @@ module.exports = class BlindPeering {
 
     try {
       await base.ready()
-    } catch {}
+    } catch {
+      this.mirroring.delete(base)
+      return
+    }
 
     if (!base.opened || base.closing || this.closed) {
       this.mirroring.delete(base)
