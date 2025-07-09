@@ -31,6 +31,10 @@ module.exports = class BlindPeering {
     this.closed = false
     this.relayThrough = relayThrough
     this.passive = passive
+
+    this.swarm.dht.on('network-change', () => {
+      for (const ref of this.blindPeersByKey.values()) ref.bump()
+    })
   }
 
   suspend () {
