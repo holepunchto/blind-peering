@@ -33,7 +33,7 @@ module.exports = class BlindPeering {
     this.passive = passive
 
     this.swarm.dht.on('network-change', () => {
-      for (const ref of this.blindPeersByKey.values()) ref.bump()
+      for (const ref of this.blindPeersByKey.values()) ref.peer.bump()
     })
   }
 
