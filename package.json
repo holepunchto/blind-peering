@@ -1,6 +1,6 @@
 {
   "name": "blind-peering",
-  "version": "1.9.0",
+  "version": "1.9.1",
   "description": "Request blind peers to keep hypercores and autobases available",
   "main": "index.js",
   "scripts": {
