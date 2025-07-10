@@ -300,7 +300,7 @@ module.exports = class BlindPeering {
     }
 
     for (const ref of close) {
-      const id = b4a.toString(ref.peer.serverKey, 'hex')
+      const id = b4a.toString(ref.peer.remotePublicKey, 'hex')
       this.blindPeersByKey.delete(id)
       ref.peer.close().catch(noop)
       this.pendingGC.delete(ref)
