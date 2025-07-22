@@ -260,20 +260,6 @@ module.exports = class BlindPeering {
     this._releaseMirror(ref)
   }
 
-  postToMailboxBackground (publicKey, msg) {
-    this.postToMailbox(publicKey, msg).catch(noop)
-  }
-
-  async postToMailbox (publicKey, msg) {
-    const ref = this._getBlindPeer(publicKey)
-
-    try {
-      await ref.peer.postToMailbox(msg)
-    } finally {
-      this._releaseMirror(ref)
-    }
-  }
-
   _releaseMirror (ref) {
     if (--ref.refs) return
     ref.gc++
