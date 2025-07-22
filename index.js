@@ -80,7 +80,7 @@ module.exports = class BlindPeering {
     this._startCoreMirroring(core, target, announce, referrer, priority, pick)
   }
 
-  async addCore (core, target = core.key, { announce = false, referrer = null, priority = 0, pick = this.picks } = {}) {
+  async addCore (core, target = core.key, { announce = false, referrer = null, priority = 0, pick = this.pick } = {}) {
     if (core.closing || this.closed || !this.coreMirrors.length) return []
     if (this.mirroring.has(core)) return []
 
