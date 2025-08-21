@@ -23,7 +23,7 @@ Create a new Blind Peering instance. `swarm` is a hyperswarm instance and `store
 
 Add a Hypercore to a blind peer.
 
-`target` is an optional key. If set, it looks for blind peers 'close' to that key. It defaults to the key of the hypercore, thereby load balancing among the available blind peers. To use a specific blind peer, set `target` to its key.
+`target` is an optional key. It looks for blind peers 'close' (using XOR distance) to that key. It defaults to the key of the hypercore, thereby load balancing among the available blind peers. To use a specific blind peer, set `target` to its key.
 
 `opts` include:
 - `announce`: whether the hypercore should be announced to the swarm (default false)
@@ -35,13 +35,21 @@ Add a Hypercore to a blind peer.
 
 Same as `addCore`, but is sync (it runs in the background).
 
+#### `await blindPeering.addAutobase(base, target)`
+
+Add an autobase to a blind peer.
+
+`base` is an Autobase instance.
+
+`target` is an optional key. It looks for blind peers 'close' (using XOR distance) to that key. It defaults to the autobase's `wakeupCapability.key`.
+
 #### `blindPeering.addAutobaseBackground(base, target)`
 
 Add an autobase to a blind peer (runs in the background).
 
 `base` is an Autobase instance.
 
-`target` is an optional key. If set, it looks for blind peers 'close' to that key. It defaults to the autobase's wakeupCapability key (or the autobase's key if the wakeup capability does not exist).
+`target` is an optional key. It looks for blind peers 'close' (using XOR distance) to that key. It defaults to the autobase's `wakeupCapability.key`.
 
 #### `await blindPeering.suspend()`
 
