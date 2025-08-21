@@ -35,6 +35,14 @@ Add a Hypercore to a blind peer.
 
 Same as `addCore`, but is sync (it runs in the background).
 
+#### `await blindPeering.addAutobase(base, target)`
+
+Add an autobase to a blind peer.
+
+`base` is an Autobase instance.
+
+`target` is an optional key. If set, it looks for blind peers 'close' to that key. It defaults to the autobase's wakeupCapability key (or the autobase's key if the wakeup capability does not exist).
+
 #### `blindPeering.addAutobaseBackground(base, target)`
 
 Add an autobase to a blind peer (runs in the background).
