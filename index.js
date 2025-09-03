@@ -232,8 +232,6 @@ module.exports = class BlindPeering {
     }
   }
 
-  _maybeMirror
-
   _addBaseCores (ref, base, all) {
     if (this.passive) return Promise.all([ref.peer.connect()])
 
