@@ -203,7 +203,7 @@ module.exports = class BlindPeering {
     ref.refs++
 
     try {
-      if (!always && await ref.isReplicating(core)) {
+      if (!always && core.id !== base.local.id) {
         return
       }
 
