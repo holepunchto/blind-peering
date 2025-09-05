@@ -173,6 +173,7 @@ module.exports = class BlindPeering {
     if (!mirrors.length) return []
 
     const promises = []
+    const local = base.local.id
 
     for (const mirrorKey of mirrors) {
       const ref = this._getBlindPeer(mirrorKey)
@@ -182,6 +183,7 @@ module.exports = class BlindPeering {
       })
 
       base.on('writer', (writer) => {
+        if (writer.core.id === local) return
         const always = isStaticCore(writer.core) || all
         this._mirrorBaseWriterBackground(ref, base, writer.core, always)
       })
@@ -236,10 +238,12 @@ module.exports = class BlindPeering {
     if (this.passive) return Promise.all([ref.peer.connect()])
 
     const promises = []
+    const local = base.local.id
 
     promises.push(this._mirrorBaseWriter(ref, base, base.local, true))
 
     for (const writer of base.activeWriters) {
+      if (writer.core.id === local) continue
       const always = isStaticCore(writer.core) || all
       promises.push(this._mirrorBaseWriter(ref, base, writer.core, always))
     }
