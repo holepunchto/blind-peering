@@ -183,7 +183,7 @@ module.exports = class BlindPeering {
 
       base.on('writer', (writer) => {
         const always = isStaticCore(writer.core) || all
-        this._mirrorBaseWriterBackground(ref, base, writer, always)
+        this._mirrorBaseWriterBackground(ref, base, writer.core, always)
       })
 
       base.on('close', () => {
@@ -241,7 +241,7 @@ module.exports = class BlindPeering {
 
     for (const writer of base.activeWriters) {
       const always = isStaticCore(writer.core) || all
-      promises.push(this._mirrorBaseWriter(ref, base, writer, always))
+      promises.push(this._mirrorBaseWriter(ref, base, writer.core, always))
     }
 
     for (const view of base.views()) {
