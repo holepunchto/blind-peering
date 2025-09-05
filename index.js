@@ -120,13 +120,13 @@ module.exports = class BlindPeering {
     const ref = this._getBlindPeer(mirrorKey)
 
     core.on('close', () => {
-      ref.cores.delete(core)
+      if (ref.cores.get(core.id) === core) ref.cores.delete(core)
       this.mirroring.delete(core)
       this._releaseMirror(ref)
     })
 
     ref.refs++
-    ref.cores.add(core)
+    ref.cores.set(core.id, core)
 
     try {
       return this.passive ? await ref.peer.connect() : await ref.peer.addCore(core.key, { announce, referrer, priority })
@@ -176,67 +176,71 @@ module.exports = class BlindPeering {
 
     for (const mirrorKey of mirrors) {
       const ref = this._getBlindPeer(mirrorKey)
-      const cores = new Set()
 
       base.core.on('migrate', () => {
-        this._mirrorBaseBackground(ref, base, cores, all)
+        this._mirrorBaseBackground(ref, base, all)
       })
 
       base.on('writer', (writer) => {
-        if (!isStaticCore(writer.core) && !all) return
-        this._mirrorBaseWriterBackground(ref, base, writer.core)
+        const always = isStaticCore(writer.core) || all
+        this._mirrorBaseWriterBackground(ref, base, writer.core, always)
       })
 
       base.on('close', () => {
         this.mirroring.delete(base)
         this._releaseMirror(ref)
-
-        for (const core of cores) {
-          ref.cores.delete(core)
-        }
       })
 
-      promises.push(this._mirrorBaseBackground(ref, base, cores, all))
+      promises.push(this._mirrorBaseBackground(ref, base, all))
     }
 
     return Promise.all(promises)
   }
 
-  async _mirrorBaseWriterBackground (ref, base, core) {
-    ref.refs++
-    ref.cores.add(core)
+  async _mirrorBaseWriter (ref, base, core, always) {
+    if (ref.cores.has(core.id)) return
 
-    const referrer = base.wakeupCapability.key
+    ref.refs++
 
     try {
-      return this.passive
-        ? await ref.peer.connect()
-        : await ref.peer.addCore(core.key, { announce: false, referrer, priority: 1 })
-    } catch (e) {
-      safetyCatch(e)
-      // ignore
+      if (!always && core.id !== base.local.id) {
+        return
+      }
+
+      ref.cores.set(core.id, core)
+
+      core.on('close', () => {
+        if (ref.cores.get(core.id) === core) ref.cores.delete(core)
+      })
+
+      const referrer = base.wakeupCapability.key
+      if (this.passive) {
+        await ref.peer.connect()
+      } else {
+        await ref.peer.addCore(core.key, { announce: false, referrer, priority: 1 })
+      }
     } finally {
       this._releaseMirror(ref)
     }
   }
 
-  _addBaseCores (ref, base, cores, all) {
+  async _mirrorBaseWriterBackground (ref, base, core) {
+    try {
+      await this._mirrorBaseWriter(ref, base, core)
+    } catch (e) {
+      safetyCatch(e)
+    }
+  }
+
+  _addBaseCores (ref, base, all) {
     if (this.passive) return Promise.all([ref.peer.connect()])
 
-    const referrer = base.wakeupCapability.key
     const promises = []
-
-    promises.push(ref.peer.addCore(base.local.key, { announce: false, referrer, priority: 1 }))
-
-    ref.cores.add(base.local)
-    cores.add(base.local)
+    promises.push(this._mirrorBaseWriter(ref, base, base.local, true))
 
     for (const writer of base.activeWriters) {
-      if (!isStaticCore(writer.core) && !all) continue
-      promises.push(ref.peer.addCore(writer.core.key, { announce: false, referrer, priority: 1 }))
-
-      ref.cores.add(writer.core)
-      cores.add(writer.core)
+      const always = isStaticCore(writer.core) || all
+      promises.push(this._mirrorBaseWriter(ref, base, writer.core, always))
     }
 
     for (const view of base.views()) {
@@ -246,13 +250,13 @@ module.exports = class BlindPeering {
     return Promise.all(promises)
   }
 
-  async _mirrorBaseBackground (ref, base, cores, all) {
+  async _mirrorBaseBackground (ref, base, all) {
     ref.refs++
 
     try {
       await base.ready()
       if (base.closing) return
-      await this._addBaseCores(ref, base, cores, all)
+      await this._addBaseCores(ref, base, all)
     } catch {
       // ignore
     }
@@ -312,12 +316,12 @@ module.exports = class BlindPeering {
         this.store.replicate(stream)
         if (this.wakeup) this.wakeup.addStream(stream)
 
-        for (const core of ref.cores) {
+        for (const core of ref.cores.values()) {
           if (core.closing || core.closed) continue
           core.replicate(stream)
         }
       })
-      ref = { refs: 0, gc: 0, uploaded: 0, peer, cores: new Set() }
+      ref = { refs: 0, gc: 0, uploaded: 0, peer, cores: new Map() }
       this.blindPeersByKey.set(id, ref)
     }
 
