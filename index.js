@@ -149,7 +149,7 @@ module.exports = class BlindPeering {
     try {
       return this.passive ? await ref.peer.connect() : await ref.peer.addCore(core.key, { announce, referrer, priority })
     } catch (e) {
-      console.log('swallowing mirrorcore error')
+      console.error('swallowing mirrorcore error')
       console.error(e)
       safetyCatch(e)
       // ignore
