@@ -87,6 +87,23 @@ module.exports = class BlindPeering {
     return await this._startCoreMirroring(core, target, announce, referrer, priority, pick)
   }
 
+  async deleteCore (key, target = key, { pick = this.pick } = {}) {
+    const proms = []
+    const refs = []
+    for (const mirrorKey of getClosestMirrorList(target, this.coreMirrors, pick)) {
+      const ref = this._getBlindPeer(mirrorKey)
+      proms.push(ref.peer.deleteCore(key))
+      refs.push(ref)
+    }
+
+    try {
+      await Promise.allSettled(proms)
+      return await Promise.all(proms)
+    } finally {
+      for (const ref of refs) this._releaseMirror(ref)
+    }
+  }
+
   async _startCoreMirroring (core, target, announce, referrer, priority, pick) {
     this.mirroring.add(core)
 
