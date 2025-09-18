@@ -132,6 +132,7 @@ module.exports = class BlindPeering {
   }
 
   async _mirrorCore (mirrorKey, core, announce, referrer, priority) {
+    console.log('blind-peering mirrorcore for mirrorkey', mirrorKey)
     if (!mirrorKey) return
 
     const ref = this._getBlindPeer(mirrorKey)
@@ -148,6 +149,8 @@ module.exports = class BlindPeering {
     try {
       return this.passive ? await ref.peer.connect() : await ref.peer.addCore(core.key, { announce, referrer, priority })
     } catch (e) {
+      console.log('swallowing mirrorcore error')
+      console.error(e)
       safetyCatch(e)
       // ignore
     } finally {
