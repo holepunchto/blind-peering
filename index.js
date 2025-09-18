@@ -97,6 +97,7 @@ module.exports = class BlindPeering {
     }
 
     try {
+      await Promise.allSettled(proms)
       return await Promise.all(proms)
     } finally {
       for (const ref of refs) this._releaseMirror(ref)
