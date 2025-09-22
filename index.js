@@ -137,7 +137,7 @@ module.exports = class BlindPeering {
     const ref = this._getBlindPeer(mirrorKey)
 
     core.on('close', () => {
-      if (ref.cores.get(core.id) === core) ref.cores.delete(core)
+      if (ref.cores.get(core.id) === core) ref.cores.delete(core.id)
       this.mirroring.delete(core)
       this._releaseMirror(ref)
     })
@@ -227,7 +227,7 @@ module.exports = class BlindPeering {
       ref.cores.set(core.id, core)
 
       core.on('close', () => {
-        if (ref.cores.get(core.id) === core) ref.cores.delete(core)
+        if (ref.cores.get(core.id) === core) ref.cores.delete(core.id)
       })
 
       const referrer = base.wakeupCapability.key
