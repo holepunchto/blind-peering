@@ -276,9 +276,9 @@ module.exports = class BlindPeering {
       await this._addBaseCores(ref, base, all)
     } catch {
       // ignore
+    } finally {
+      this._releaseMirror(ref)
     }
-
-    this._releaseMirror(ref)
   }
 
   _releaseMirror (ref) {
