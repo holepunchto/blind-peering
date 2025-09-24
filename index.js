@@ -16,7 +16,8 @@ module.exports = class BlindPeering {
     gcWait = 2000,
     pick = 2,
     relayThrough = null,
-    passive = false
+    passive = false,
+    requestTimeout = 10000
   }) {
     this.swarm = swarm
     this.store = store
@@ -33,6 +34,7 @@ module.exports = class BlindPeering {
     this.relayThrough = relayThrough
     this.passive = passive
     this.pick = pick
+    this.requestTimeout = requestTimeout
 
     this.swarm.dht.on('network-change', () => {
       for (const ref of this.blindPeersByKey.values()) ref.peer.bump()
@@ -328,7 +330,7 @@ module.exports = class BlindPeering {
     let ref = this.blindPeersByKey.get(id)
 
     if (!ref) {
-      const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, { suspended: this.suspended, relayThrough: this.relayThrough })
+      const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, { suspended: this.suspended, relayThrough: this.relayThrough, timeout: this.requestTimeout })
       peer.on('stream', stream => {
         this.store.replicate(stream)
         if (this.wakeup) this.wakeup.addStream(stream)
