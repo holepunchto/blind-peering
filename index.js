@@ -214,7 +214,7 @@ module.exports = class BlindPeering {
     return Promise.all(promises)
   }
 
-  async _mirrorBaseWriter (ref, base, core, always = false) {
+  async _mirrorBaseWriter (ref, base, core, always) {
     if (ref.cores.has(core.id)) return
 
     ref.refs++
