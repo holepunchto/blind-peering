@@ -9,7 +9,8 @@ module.exports = class BlindPeering {
   constructor (swarm, store, {
     suspended = false,
     wakeup = null,
-    mirrors = [],
+    keys = [],
+    mirrors = keys, // compat
     mediaMirrors = mirrors,
     autobaseMirrors = mirrors,
     coreMirrors = mediaMirrors,
@@ -37,6 +38,10 @@ module.exports = class BlindPeering {
     this.swarm.dht.on('network-change', () => {
       for (const ref of this.blindPeersByKey.values()) ref.peer.bump()
     })
+  }
+
+  setKeys (keys) {
+    this.coreMirrors = this.autobaseMirrors = keys.map(HypercoreId.decode)
   }
 
   suspend () {
