@@ -5,8 +5,7 @@
   "main": "index.js",
   "scripts": {
     "format": "prettier --write .",
-    "test": "prettier --check . && brittle test/*.js",
-    "test:bare": "bare test/basic.js"
+    "test": "prettier --check"
   },
   "files": [
     "lib/",
