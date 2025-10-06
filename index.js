@@ -6,19 +6,23 @@ const safetyCatch = require('safety-catch')
 const BlindPeerClient = require('./lib/client.js')
 
 module.exports = class BlindPeering {
-  constructor (swarm, store, {
-    suspended = false,
-    wakeup = null,
-    keys = [],
-    mirrors = keys, // compat
-    mediaMirrors = mirrors,
-    autobaseMirrors = mirrors,
-    coreMirrors = mediaMirrors,
-    gcWait = 2000,
-    pick = 2,
-    relayThrough = null,
-    passive = false
-  }) {
+  constructor(
+    swarm,
+    store,
+    {
+      suspended = false,
+      wakeup = null,
+      keys = [],
+      mirrors = keys, // compat
+      mediaMirrors = mirrors,
+      autobaseMirrors = mirrors,
+      coreMirrors = mediaMirrors,
+      gcWait = 2000,
+      pick = 2,
+      relayThrough = null,
+      passive = false
+    }
+  ) {
     this.swarm = swarm
     this.store = store
     this.wakeup = wakeup
@@ -40,11 +44,11 @@ module.exports = class BlindPeering {
     })
   }
 
-  setKeys (keys) {
+  setKeys(keys) {
     this.coreMirrors = this.autobaseMirrors = keys.map(HypercoreId.decode)
   }
 
-  suspend () {
+  suspend() {
     this.suspended = true
     this._stopGC()
 
@@ -55,7 +59,7 @@ module.exports = class BlindPeering {
     return Promise.all(suspending)
   }
 
-  resume () {
+  resume() {
     this.suspended = false
     if (this.pendingGC.size) this._startGC()
 
@@ -66,7 +70,7 @@ module.exports = class BlindPeering {
     return Promise.all(resuming)
   }
 
-  close () {
+  close() {
     this.closed = true
     this._stopGC()
 
@@ -78,21 +82,41 @@ module.exports = class BlindPeering {
     return Promise.all(pending)
   }
 
-  addCoreBackground (core, target = core.key, { announce = false, referrer = null, priority = 0, pick = this.pick, mirrors = this.coreMirrors } = {}) {
+  addCoreBackground(
+    core,
+    target = core.key,
+    {
+      announce = false,
+      referrer = null,
+      priority = 0,
+      pick = this.pick,
+      mirrors = this.coreMirrors
+    } = {}
+  ) {
     if (core.closing || this.closed || !mirrors.length) return
     if (this.mirroring.has(core)) return
 
     this._startCoreMirroring(core, target, mirrors, announce, referrer, priority, pick)
   }
 
-  async addCore (core, target = core.key, { announce = false, referrer = null, priority = 0, pick = this.pick, mirrors = this.coreMirrors } = {}) {
+  async addCore(
+    core,
+    target = core.key,
+    {
+      announce = false,
+      referrer = null,
+      priority = 0,
+      pick = this.pick,
+      mirrors = this.coreMirrors
+    } = {}
+  ) {
     if (core.closing || this.closed || !mirrors.length) return []
     if (this.mirroring.has(core)) return []
 
     return await this._startCoreMirroring(core, target, mirrors, announce, referrer, priority, pick)
   }
 
-  async deleteCore (key, target = key, { pick = this.pick, mirrors = this.coreMirrors } = {}) {
+  async deleteCore(key, target = key, { pick = this.pick, mirrors = this.coreMirrors } = {}) {
     const proms = []
     const refs = []
     for (const mirrorKey of getClosestMirrorList(target, mirrors, pick)) {
@@ -109,7 +133,7 @@ module.exports = class BlindPeering {
     }
   }
 
-  async _startCoreMirroring (core, target, mirrors, announce, referrer, priority, pick) {
+  async _startCoreMirroring(core, target, mirrors, announce, referrer, priority, pick) {
     this.mirroring.add(core)
 
     try {
@@ -125,8 +149,17 @@ module.exports = class BlindPeering {
 
     if (!target) target = core.key
 
-    if (pick === 1) { // easy case
-      return [await this._mirrorCore(getClosestMirror(target, mirrors), core, announce, referrer, priority)]
+    if (pick === 1) {
+      // easy case
+      return [
+        await this._mirrorCore(
+          getClosestMirror(target, mirrors),
+          core,
+          announce,
+          referrer,
+          priority
+        )
+      ]
     }
 
     const all = []
@@ -136,7 +169,7 @@ module.exports = class BlindPeering {
     return Promise.all(all)
   }
 
-  async _mirrorCore (mirrorKey, core, announce, referrer, priority) {
+  async _mirrorCore(mirrorKey, core, announce, referrer, priority) {
     if (!mirrorKey) return
 
     const ref = this._getBlindPeer(mirrorKey)
@@ -151,7 +184,9 @@ module.exports = class BlindPeering {
     ref.cores.set(core.id, core)
 
     try {
-      return this.passive ? await ref.peer.connect() : await ref.peer.addCore(core.key, { announce, referrer, priority })
+      return this.passive
+        ? await ref.peer.connect()
+        : await ref.peer.addCore(core.key, { announce, referrer, priority })
     } catch (e) {
       safetyCatch(e)
       // ignore
@@ -160,21 +195,29 @@ module.exports = class BlindPeering {
     }
   }
 
-  addAutobaseBackground (base, target = (base.wakeupCapability && base.wakeupCapability.key), { all = false, pick = this.pick, mirrors = this.autobaseMirrors } = {}) {
+  addAutobaseBackground(
+    base,
+    target = base.wakeupCapability && base.wakeupCapability.key,
+    { all = false, pick = this.pick, mirrors = this.autobaseMirrors } = {}
+  ) {
     if (base.closing || this.closed || !mirrors.length) return
     if (this.mirroring.has(base)) return
 
     this._startAutobaseMirroring(base, target, mirrors, all, pick)
   }
 
-  async addAutobase (base, target = (base.wakeupCapability && base.wakeupCapability.key), { all = false, pick = this.pick, mirrors = this.autobaseMirrors } = {}) {
+  async addAutobase(
+    base,
+    target = base.wakeupCapability && base.wakeupCapability.key,
+    { all = false, pick = this.pick, mirrors = this.autobaseMirrors } = {}
+  ) {
     if (base.closing || this.closed || !mirrors.length) return
     if (this.mirroring.has(base)) return
 
     return this._startAutobaseMirroring(base, target, mirrors, all, pick)
   }
 
-  async _startAutobaseMirroring (base, target, mirrors, all, pick) {
+  async _startAutobaseMirroring(base, target, mirrors, all, pick) {
     this.mirroring.add(base)
 
     try {
@@ -219,7 +262,7 @@ module.exports = class BlindPeering {
     return Promise.all(promises)
   }
 
-  async _mirrorBaseWriter (ref, base, core, always) {
+  async _mirrorBaseWriter(ref, base, core, always) {
     if (ref.cores.has(core.id)) return
 
     ref.refs++
@@ -246,7 +289,7 @@ module.exports = class BlindPeering {
     }
   }
 
-  async _mirrorBaseWriterBackground (ref, base, core, always) {
+  async _mirrorBaseWriterBackground(ref, base, core, always) {
     try {
       await this._mirrorBaseWriter(ref, base, core, always)
     } catch (e) {
@@ -254,7 +297,7 @@ module.exports = class BlindPeering {
     }
   }
 
-  _addBaseCores (ref, base, all) {
+  _addBaseCores(ref, base, all) {
     if (this.passive) return Promise.all([ref.peer.connect()])
 
     const promises = []
@@ -272,7 +315,7 @@ module.exports = class BlindPeering {
     return Promise.all(promises)
   }
 
-  async _mirrorBaseBackground (ref, base, all) {
+  async _mirrorBaseBackground(ref, base, all) {
     ref.refs++
 
     try {
@@ -286,26 +329,26 @@ module.exports = class BlindPeering {
     }
   }
 
-  _releaseMirror (ref) {
+  _releaseMirror(ref) {
     if (--ref.refs) return
     ref.gc++
     this.pendingGC.add(ref)
     this._startGC()
   }
 
-  _stopGC () {
+  _stopGC() {
     if (this.gcInterval) clearInterval(this.gcInterval)
     this.gcInterval = null
   }
 
-  _startGC () {
+  _startGC() {
     if (this.closed) return
     if (!this.gcInterval) {
       this.gcInterval = setInterval(this._gc.bind(this), this.gcWait)
     }
   }
 
-  _gc () {
+  _gc() {
     const close = []
     for (const ref of this.pendingGC) {
       const uploaded = getBlocksUploadedTo(ref.peer.stream)
@@ -327,14 +370,17 @@ module.exports = class BlindPeering {
     }
   }
 
-  _getBlindPeer (mirrorKey) {
+  _getBlindPeer(mirrorKey) {
     const id = b4a.toString(mirrorKey, 'hex')
 
     let ref = this.blindPeersByKey.get(id)
 
     if (!ref) {
-      const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, { suspended: this.suspended, relayThrough: this.relayThrough })
-      peer.on('stream', stream => {
+      const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, {
+        suspended: this.suspended,
+        relayThrough: this.relayThrough
+      })
+      peer.on('stream', (stream) => {
         this.store.replicate(stream)
         if (this.wakeup) this.wakeup.addStream(stream)
 
@@ -356,7 +402,7 @@ module.exports = class BlindPeering {
   }
 }
 
-function getBlocksUploadedTo (stream) {
+function getBlocksUploadedTo(stream) {
   if (!stream || !stream.userData) return 0
   let uploadedTotal = 0
   for (const ch of stream.userData) {
@@ -366,7 +412,7 @@ function getBlocksUploadedTo (stream) {
   return uploadedTotal
 }
 
-function getClosestMirrorList (key, list, n) {
+function getClosestMirrorList(key, list, n) {
   if (!list || !list.length) return []
 
   if (n > list.length) n = list.length
@@ -386,7 +432,7 @@ function getClosestMirrorList (key, list, n) {
   return list.slice(0, n)
 }
 
-function getClosestMirror (key, list) {
+function getClosestMirror(key, list) {
   if (!list || !list.length) return null
 
   let result = null
@@ -402,8 +448,8 @@ function getClosestMirror (key, list) {
   return result
 }
 
-function isStaticCore (core) {
+function isStaticCore(core) {
   return !!core.manifest && core.manifest.signers.length === 0
 }
 
-function noop () {}
+function noop() {}

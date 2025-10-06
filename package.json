@@ -4,7 +4,9 @@
   "description": "Request blind peers to keep hypercores and autobases available",
   "main": "index.js",
   "scripts": {
-    "test": "standard"
+    "format": "prettier --write .",
+    "test": "prettier --check . && brittle test/*.js",
+    "test:bare": "bare test/basic.js"
   },
   "files": [
     "lib/",
@@ -32,6 +34,7 @@
   },
   "homepage": "https://github.com/holepunchto/blind-peering",
   "devDependencies": {
-    "standard": "^17.1.2"
+    "prettier": "^3.6.2",
+    "prettier-config-holepunch": "^2.0.0"
   }
 }

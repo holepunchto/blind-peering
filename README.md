@@ -15,6 +15,7 @@ npm install blind-peering
 Create a new Blind Peering instance. `swarm` is a hyperswarm instance and `store` is a Corestore instance.
 
 `opts` include:
+
 - `mirrors`: a list of blind peer keys (mirrors) to use. You should always set this, otherwise there are no mirrors to contact.
 - `suspended`: whether to start in suspended state (default `false`)
 - `wakeup`: a Wakeup object
@@ -26,6 +27,7 @@ Add a Hypercore to a blind peer.
 `target` is an optional key. It looks for blind peers 'close' (using XOR distance) to that key. It defaults to the key of the hypercore, thereby load balancing among the available blind peers. To use a specific blind peer, set `target` to its key.
 
 `opts` include:
+
 - `announce`: whether the hypercore should be announced to the swarm (default false)
 - `mirrors`: how many blind peers to contact. Defaults to 1.
 - `referrer`: key of a referrer hypercore to pass to the blind peer
