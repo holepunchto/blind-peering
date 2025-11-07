@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "format": "prettier --write .",
-    "test": "prettier --check"
+    "test": "prettier --check ."
   },
   "files": [
     "lib/",

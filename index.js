@@ -248,6 +248,7 @@ module.exports = class BlindPeering {
 
       base.on('writer', (writer) => {
         const always = isStaticCore(writer.core) || all
+        // TODO: refactor this flow too?
         this._mirrorBaseWriterBackground(ref, base, writer.core, always)
       })
 
@@ -262,6 +263,11 @@ module.exports = class BlindPeering {
     return Promise.all(promises)
   }
 
+  _shouldAddBaseWriter(ref, base, core, always) {
+    if (ref.cores.has(core.id)) return false
+    return always || core.id === base.local.id
+  }
+
   async _mirrorBaseWriter(ref, base, core, always) {
     if (ref.cores.has(core.id)) return
 
@@ -274,6 +280,7 @@ module.exports = class BlindPeering {
 
       ref.cores.set(core.id, core)
 
+      // TODO: Isn't this pattern bugged? There might be other sessions active
       core.on('close', () => {
         if (ref.cores.get(core.id) === core) ref.cores.delete(core.id)
       })
@@ -300,19 +307,44 @@ module.exports = class BlindPeering {
   _addBaseCores(ref, base, all) {
     if (this.passive) return Promise.all([ref.peer.connect()])
 
-    const promises = []
-    promises.push(this._mirrorBaseWriter(ref, base, base.local, true))
+    const coresToAdd = new Map()
+    if (this._shouldAddBaseWriter(ref, base, base.local, all)) {
+      coresToAdd.set(base.local.id, base.local)
+    }
 
     for (const writer of base.activeWriters) {
-      const always = isStaticCore(writer.core) || all
-      promises.push(this._mirrorBaseWriter(ref, base, writer.core, always))
+      if (coresToAdd.has(writer.core.id)) continue
+      if (this._shouldAddBaseWriter(ref, base, writer.core, all)) {
+        coresToAdd.set(writer.core.id, writer.core)
+      }
     }
 
-    for (const view of base.views()) {
-      promises.push(ref.peer.addCore(view.key, { announce: false, referrer: null, priority: 1 }))
-    }
+    ref.refs++
+    try {
+      for (const core of coresToAdd.values()) {
+        ref.cores.set(core.id, core)
+        core.on('close', () => {
+          if (ref.cores.get(core.id) === core) ref.cores.delete(core.id)
+        })
+      }
 
-    return Promise.all(promises)
+      const promises = []
+      if (coresToAdd.size) {
+        promises.push(
+          ref.peer.addAutobaseCores([...coresToAdd.values()], base.wakeupCapability.key, {
+            priority: 1
+          })
+        )
+      }
+
+      for (const view of base.views()) {
+        promises.push(ref.peer.addCore(view.key, { announce: false, referrer: null, priority: 1 }))
+      }
+
+      return Promise.all(promises)
+    } finally {
+      this._releaseMirror(ref)
+    }
   }
 
   async _mirrorBaseBackground(ref, base, all) {
@@ -322,8 +354,8 @@ module.exports = class BlindPeering {
       await base.ready()
       if (base.closing) return
       await this._addBaseCores(ref, base, all)
-    } catch {
-      // ignore
+    } catch (e) {
+      safetyCatch(e)
     } finally {
       this._releaseMirror(ref)
     }
