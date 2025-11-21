@@ -285,7 +285,6 @@ module.exports = class BlindPeering {
 
       base.on('writer', (writer) => {
         const always = isStaticCore(writer.core) || all
-        // TODO: refactor this flow too?
         this._mirrorBaseWriterBackground(ref, base, writer.core, always)
       })
 
