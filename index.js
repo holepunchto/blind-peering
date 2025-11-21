@@ -317,7 +317,6 @@ module.exports = class BlindPeering {
 
       ref.cores.set(core.id, core)
 
-      // TODO: Isn't this pattern bugged? There might be other sessions active
       core.on('close', () => {
         if (ref.cores.get(core.id) === core) ref.cores.delete(core.id)
       })
