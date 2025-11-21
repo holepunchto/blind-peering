@@ -201,7 +201,11 @@ module.exports = class BlindPeering {
     { all = false, pick = this.pick, mirrors = this.autobaseMirrors } = {}
   ) {
     if (base.closing || this.closed || !mirrors.length) return
-    if (this.mirroring.has(base)) return
+
+    if (this.mirroring.has(base)) {
+      if (all) this._autobaseMirrorAll(base, target, mirrors, pick).catch(safetyCatch)
+      return
+    }
 
     this._startAutobaseMirroring(base, target, mirrors, all, pick)
   }
@@ -212,9 +216,42 @@ module.exports = class BlindPeering {
     { all = false, pick = this.pick, mirrors = this.autobaseMirrors } = {}
   ) {
     if (base.closing || this.closed || !mirrors.length) return
-    if (this.mirroring.has(base)) return
+
+    if (this.mirroring.has(base)) {
+      return all ? this._autobaseMirrorAll(base, target, mirrors, pick) : []
+    }
 
     return this._startAutobaseMirroring(base, target, mirrors, all, pick)
+  }
+
+  async _autobaseMirrorAll(base, target, mirrors, pick) {
+    try {
+      await base.ready()
+    } catch {
+      return
+    }
+
+    if (!base.opened || base.closing || this.closed) return
+
+    if (!target) target = base.wakeupCapability.key
+
+    const closest = getClosestMirrorList(target, mirrors, pick)
+    if (!closest.length) return []
+
+    const promises = []
+    const refs = new Set()
+
+    for (const mirrorKey of closest) {
+      const ref = this._getBlindPeer(mirrorKey)
+      refs.add(ref)
+      promises.push(this._mirrorBaseBackground(ref, base, true))
+    }
+
+    try {
+      return await Promise.all(promises)
+    } finally {
+      for (const ref of refs) this._releaseMirror(ref)
+    }
   }
 
   async _startAutobaseMirroring(base, target, mirrors, all, pick) {
