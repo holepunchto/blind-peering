@@ -20,7 +20,8 @@ module.exports = class BlindPeering {
       gcWait = 2000,
       pick = 2,
       relayThrough = null,
-      passive = false
+      passive = false,
+      autobaseWritersPerRequest = 32
     }
   ) {
     this.swarm = swarm
@@ -38,7 +39,7 @@ module.exports = class BlindPeering {
     this.relayThrough = relayThrough
     this.passive = passive
     this.pick = pick
-
+    this.autobaseWritersPerRequest = autobaseWritersPerRequest
     this.swarm.dht.on('network-change', () => {
       for (const ref of this.blindPeersByKey.values()) ref.peer.bump()
     })
@@ -299,11 +300,6 @@ module.exports = class BlindPeering {
     return Promise.all(promises)
   }
 
-  _shouldAddBaseWriter(ref, base, core, always) {
-    if (ref.cores.has(core.id)) return false
-    return always || core.id === base.local.id
-  }
-
   async _mirrorBaseWriter(ref, base, core, always) {
     if (ref.cores.has(core.id)) return
 
@@ -343,20 +339,31 @@ module.exports = class BlindPeering {
     if (this.passive) return Promise.all([ref.peer.connect()])
 
     const coresToAdd = new Map()
-    if (this._shouldAddBaseWriter(ref, base, base.local, all)) {
-      coresToAdd.set(base.local.id, base.local)
-    }
+    if (!ref.cores.has(base.local.id)) coresToAdd.set(base.local.id, base.local)
 
+    // Add up to 'autobaseWritersPerRequest' active writers (random)
+    const candidates = []
     for (const writer of base.activeWriters) {
-      if (coresToAdd.has(writer.core.id)) continue
-      if (this._shouldAddBaseWriter(ref, base, writer.core, all)) {
-        coresToAdd.set(writer.core.id, writer.core)
-      }
+      if (!coresToAdd.has(writer.core.id)) candidates.push(writer.core)
+    }
+    const sliceStart = Math.floor(Math.random() * candidates.length)
+    for (let i = sliceStart; i < candidates.length; i++) {
+      if (coresToAdd.size >= this.autobaseWritersPerRequest) break
+      const core = candidates[i]
+      coresToAdd.set(core.id, core)
+    }
+    for (let i = 0; i < sliceStart; i++) {
+      if (coresToAdd.size >= this.autobaseWritersPerRequest) break
+      const core = candidates[i]
+      coresToAdd.set(core.id, core)
     }
 
     ref.refs++
     try {
       for (const core of coresToAdd.values()) {
+        // TODO: if the blind-peer server does not set up replication, because
+        // the lengths are equal, should we not remove the core from ref.cores
+        // so it can be added again later if its length does change?
         ref.cores.set(core.id, core)
         core.on('close', () => {
           if (ref.cores.get(core.id) === core) ref.cores.delete(core.id)
