@@ -338,29 +338,22 @@ module.exports = class BlindPeering {
   _addBaseCores(ref, base, all) {
     if (this.passive) return Promise.all([ref.peer.connect()])
 
-    const coresToAdd = new Map()
-    if (!ref.cores.has(base.local.id)) coresToAdd.set(base.local.id, base.local)
+    const coresToAdd = []
+    if (!ref.cores.has(base.local.id)) coresToAdd.push(base.local) // we always add our own
 
     // Add up to 'autobaseWritersPerRequest' active writers (random)
     const candidates = []
     for (const writer of base.activeWriters) {
-      if (!coresToAdd.has(writer.core.id)) candidates.push(writer.core)
+      if (!ref.cores.has(writer.core.id) && writer.core.id !== base.local.id)
+        candidates.push(writer.core)
     }
-    const sliceStart = Math.floor(Math.random() * candidates.length)
-    for (let i = sliceStart; i < candidates.length; i++) {
-      if (coresToAdd.size >= this.autobaseWritersPerRequest) break
-      const core = candidates[i]
-      coresToAdd.set(core.id, core)
-    }
-    for (let i = 0; i < sliceStart; i++) {
-      if (coresToAdd.size >= this.autobaseWritersPerRequest) break
-      const core = candidates[i]
-      coresToAdd.set(core.id, core)
-    }
+    coresToAdd.push(
+      ...getRandomSlice(candidates, this.autobaseWritersPerRequest - coresToAdd.length)
+    )
 
     ref.refs++
     try {
-      for (const core of coresToAdd.values()) {
+      for (const core of coresToAdd) {
         // TODO: if the blind-peer server does not set up replication, because
         // the lengths are equal, should we not remove the core from ref.cores
         // so it can be added again later if its length does change?
@@ -371,7 +364,7 @@ module.exports = class BlindPeering {
       }
 
       const promises = []
-      if (coresToAdd.size) {
+      if (coresToAdd) {
         promises.push(
           ref.peer.addAutobaseCores([...coresToAdd.values()], base.wakeupCapability.key, {
             priority: 1
@@ -524,6 +517,20 @@ function getClosestMirror(key, list) {
 
 function isStaticCore(core) {
   return !!core.manifest && core.manifest.signers.length === 0
+}
+
+function getRandomSlice(candidates, size) {
+  if (candidates.length < size) return candidates
+
+  const sliceStart = Math.floor(Math.random() * candidates.length)
+  const result = candidates.slice(sliceStart, sliceStart + size)
+
+  if (result.length === size) return result
+
+  // wrap around to start
+  const nrMissing = size - result.length
+  result.push(...candidates.slice(0, nrMissing))
+  return result
 }
 
 function noop() {}
