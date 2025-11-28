@@ -20,7 +20,8 @@ module.exports = class BlindPeering {
       gcWait = 2000,
       pick = 2,
       relayThrough = null,
-      passive = false
+      passive = false,
+      autobaseWritersPerRequest = 32
     }
   ) {
     this.swarm = swarm
@@ -38,7 +39,7 @@ module.exports = class BlindPeering {
     this.relayThrough = relayThrough
     this.passive = passive
     this.pick = pick
-
+    this.autobaseWritersPerRequest = autobaseWritersPerRequest
     this.swarm.dht.on('network-change', () => {
       for (const ref of this.blindPeersByKey.values()) ref.peer.bump()
     })
@@ -337,19 +338,48 @@ module.exports = class BlindPeering {
   _addBaseCores(ref, base, all) {
     if (this.passive) return Promise.all([ref.peer.connect()])
 
-    const promises = []
-    promises.push(this._mirrorBaseWriter(ref, base, base.local, true))
+    const coresToAdd = []
+    if (!ref.cores.has(base.local.id)) coresToAdd.push(base.local) // we always add our own
 
+    // Add up to 'autobaseWritersPerRequest' active writers (random)
+    const candidates = []
     for (const writer of base.activeWriters) {
-      const always = isStaticCore(writer.core) || all
-      promises.push(this._mirrorBaseWriter(ref, base, writer.core, always))
+      if (!ref.cores.has(writer.core.id) && writer.core.id !== base.local.id)
+        candidates.push(writer.core)
     }
+    coresToAdd.push(
+      ...getRandomSlice(candidates, this.autobaseWritersPerRequest - coresToAdd.length)
+    )
 
-    for (const view of base.views()) {
-      promises.push(ref.peer.addCore(view.key, { announce: false, referrer: null, priority: 1 }))
+    ref.refs++
+    try {
+      for (const core of coresToAdd) {
+        // TODO: if the blind-peer server does not set up replication, because
+        // the lengths are equal, should we not remove the core from ref.cores
+        // so it can be added again later if its length does change?
+        ref.cores.set(core.id, core)
+        core.on('close', () => {
+          if (ref.cores.get(core.id) === core) ref.cores.delete(core.id)
+        })
+      }
+
+      const promises = []
+      if (coresToAdd) {
+        promises.push(
+          ref.peer.addAutobaseCores([...coresToAdd.values()], base.wakeupCapability.key, {
+            priority: 1
+          })
+        )
+      }
+
+      for (const view of base.views()) {
+        promises.push(ref.peer.addCore(view.key, { announce: false, referrer: null, priority: 1 }))
+      }
+
+      return Promise.all(promises)
+    } finally {
+      this._releaseMirror(ref)
     }
-
-    return Promise.all(promises)
   }
 
   async _mirrorBaseBackground(ref, base, all) {
@@ -359,8 +389,8 @@ module.exports = class BlindPeering {
       await base.ready()
       if (base.closing) return
       await this._addBaseCores(ref, base, all)
-    } catch {
-      // ignore
+    } catch (e) {
+      safetyCatch(e)
     } finally {
       this._releaseMirror(ref)
     }
@@ -487,6 +517,20 @@ function getClosestMirror(key, list) {
 
 function isStaticCore(core) {
   return !!core.manifest && core.manifest.signers.length === 0
+}
+
+function getRandomSlice(candidates, size) {
+  if (candidates.length < size) return candidates
+
+  const sliceStart = Math.floor(Math.random() * candidates.length)
+  const result = candidates.slice(sliceStart, sliceStart + size)
+
+  if (result.length === size) return result
+
+  // wrap around to start
+  const nrMissing = size - result.length
+  result.push(...candidates.slice(0, nrMissing))
+  return result
 }
 
 function noop() {}
