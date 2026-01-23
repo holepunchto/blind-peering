@@ -4,11 +4,13 @@
   "description": "Request blind peers to keep hypercores and autobases available",
   "main": "index.js",
   "scripts": {
-    "format": "prettier --write .",
-    "test": "prettier --check"
+    "format": "prettier . --write",
+    "test": "prettier . --check && lunte && brittle-bare test/all.js",
+    "lint": "lunte"
   },
   "files": [
     "lib/",
+    "spec",
     "index.js"
   ],
   "dependencies": {
@@ -33,6 +35,10 @@
   },
   "homepage": "https://github.com/holepunchto/blind-peering",
   "devDependencies": {
+    "blind-peer": "^3.1.0",
+    "brittle": "^3.19.1",
+    "corestore": "^7.7.0",
+    "hyperdht": "^6.28.0",
     "prettier": "^3.6.2",
     "prettier-config-holepunch": "^2.0.0"
   }
