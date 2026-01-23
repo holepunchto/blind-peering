@@ -4,6 +4,7 @@ const HypercoreId = require('hypercore-id-encoding')
 const safetyCatch = require('safety-catch')
 
 const BlindPeerClient = require('./lib/client.js')
+const { decode } = require('./spec/hyperschema/index.js')
 
 module.exports = class BlindPeering {
   constructor(
@@ -26,8 +27,9 @@ module.exports = class BlindPeering {
     this.swarm = swarm
     this.store = store
     this.wakeup = wakeup
-    this.autobaseMirrors = autobaseMirrors.map(HypercoreId.decode)
-    this.coreMirrors = coreMirrors.map(HypercoreId.decode)
+    this.mirrorCache = new Map()
+    this.autobaseMirrors = autobaseMirrors.map(this._decodeKey.bind(this))
+    this.coreMirrors = coreMirrors.map(this._decodeKey.bind(this))
     this.blindPeersByKey = new Map()
     this.suspended = suspended
     this.gcWait = gcWait
@@ -44,8 +46,20 @@ module.exports = class BlindPeering {
     })
   }
 
+  _decodeKey(key) {
+    if (key.length <= 32) {
+      return HypercoreId.decode(key)
+    }
+
+    const value = decode('@blind-peering/blind-peer-key', key)
+
+    this.mirrorCache.set(value.key, value.nodes)
+
+    return value.key
+  }
+
   setKeys(keys) {
-    this.coreMirrors = this.autobaseMirrors = keys.map(HypercoreId.decode)
+    this.coreMirrors = this.autobaseMirrors = keys.map(this._decodeKey.bind(this))
   }
 
   suspend() {
@@ -415,13 +429,15 @@ module.exports = class BlindPeering {
     if (!ref) {
       const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, {
         suspended: this.suspended,
-        relayThrough: this.relayThrough
+        relayThrough: this.relayThrough,
+        mirrorCache: this.mirrorCache
       })
       peer.on('stream', (stream) => {
         this.store.replicate(stream)
         if (this.wakeup) this.wakeup.addStream(stream)
 
         for (const core of ref.cores.values()) {
+          console.log('swarm replicating', core.length)
           if (core.closing || core.closed) continue
           core.replicate(stream)
         }
