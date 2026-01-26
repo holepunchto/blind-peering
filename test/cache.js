@@ -6,8 +6,6 @@ const tmp = require('test-tmp')
 const test = require('brittle')
 const BlindPeering = require('..')
 
-const { encode, decode } = require('../spec/hyperschema')
-
 test('uses cache', async (t) => {
   const testnet = await createTestnet()
   const storage = await tmp(t)
@@ -48,12 +46,13 @@ test('uses cache', async (t) => {
   }
   console.log(nodes)
 
-  const blindPeerKey = encode('@blind-peering/blind-peer-key', {
-    key: blindPeer.publicKey,
-    nodes
-  })
+  const mirrorCache = new Map()
+  mirrorCache.set(blindPeer.publicKey, nodes)
 
-  const client = new BlindPeering(swarm, store, { mediaMirrors: [blindPeerKey] })
+  const client = new BlindPeering(swarm, store, {
+    mediaMirrors: [blindPeer.publicKey],
+    mirrorCache
+  })
   client.addCoreBackground(core, coreKey, { announce: true })
   t.pass('added core')
 
