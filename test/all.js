@@ -7,6 +7,7 @@ async function runTests() {
 
   test.pause()
 
+  await import('./cache.js')
   await import('./schema.js')
 
   test.resume()
