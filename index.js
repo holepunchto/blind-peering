@@ -1,442 +1,448 @@
+const BlindPeerMuxer = require('blind-peer-muxer')
 const xorDistance = require('xor-distance')
 const b4a = require('b4a')
-const HypercoreId = require('hypercore-id-encoding')
+const ID = require('hypercore-id-encoding')
 const safetyCatch = require('safety-catch')
+const Backoff = require('./lib/backoff.js')
 
-const BlindPeerClient = require('./lib/client.js')
+const DEFAULT_BACKOFF = [1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000]
+const MAX_BATCH_MIN = 32
+const MAX_BATCH_MAX = 64
 
-module.exports = class BlindPeering {
-  constructor(
-    swarm,
-    store,
-    {
+class BlindPeering {
+  constructor(dht, store, opts = {}) {
+    const {
       suspended = false,
       wakeup = null,
       keys = [],
-      mirrors = keys, // compat
-      mediaMirrors = mirrors,
-      autobaseMirrors = mirrors,
-      coreMirrors = mediaMirrors,
       gcWait = 2000,
       pick = 2,
-      relayThrough = null,
-      passive = false
-    }
-  ) {
-    this.swarm = swarm
-    this.store = store
-    this.wakeup = wakeup
-    this.autobaseMirrors = autobaseMirrors.map(HypercoreId.decode)
-    this.coreMirrors = coreMirrors.map(HypercoreId.decode)
-    this.blindPeersByKey = new Map()
-    this.suspended = suspended
-    this.gcWait = gcWait
-    this.pendingGC = new Set()
-    this.mirroring = new Set()
-    this.gcInterval = null
-    this.closed = false
-    this.relayThrough = relayThrough
-    this.passive = passive
-    this.pick = pick
+      relayThrough = null
+    } = opts
 
-    this.swarm.dht.on('network-change', () => {
-      for (const ref of this.blindPeersByKey.values()) ref.peer.bump()
-    })
+    this.dht = dht
+    this.store = store
+    this.suspended = suspended
+    this.closed = false
+    this.wakeup = wakeup
+    this.keys = keys.map(ID.decode)
+    this.gcWait = gcWait
+    this.pick = pick
+    this.relayThrough = relayThrough
+    this.blindPeers = new Map()
+
+    this._gc = new Set()
+    this._gcTimer = null
+    this._runGCBound = this._runGC.bind(this)
+    this._bumpBound = this.bump.bind(this)
+
+    this.dht.on('network-change', this._bumpBound)
+  }
+
+  bump() {
+    for (const peer of this.blindPeers.values()) {
+      peer.bump()
+    }
   }
 
   setKeys(keys) {
-    this.coreMirrors = this.autobaseMirrors = keys.map(HypercoreId.decode)
+    this.keys = keys.map(ID.decode)
+    // TODO: rebalance
   }
 
-  suspend() {
-    this.suspended = true
-    this._stopGC()
+  _addGC(peer) {
+    peer.gc = 1
 
-    const suspending = []
-    for (const ref of this.blindPeersByKey.values()) {
-      suspending.push(ref.peer.suspend())
-    }
-    return Promise.all(suspending)
+    const empty = this._gc.size === 0
+    this._gc.add(peer)
+
+    if (empty) this._startGC()
   }
 
-  resume() {
-    this.suspended = false
-    if (this.pendingGC.size) this._startGC()
-
-    const resuming = []
-    for (const ref of this.blindPeersByKey.values()) {
-      resuming.push(ref.peer.resume())
-    }
-    return Promise.all(resuming)
-  }
-
-  close() {
-    this.closed = true
-    this._stopGC()
-
-    const pending = []
-    for (const ref of this.blindPeersByKey.values()) {
-      pending.push(ref.peer.close())
-    }
-
-    return Promise.all(pending)
-  }
-
-  addCoreBackground(
-    core,
-    target = core.key,
-    {
-      announce = false,
-      referrer = null,
-      priority = 0,
-      pick = this.pick,
-      mirrors = this.coreMirrors
-    } = {}
-  ) {
-    if (core.closing || this.closed || !mirrors.length) return
-    if (this.mirroring.has(core)) return
-
-    this._startCoreMirroring(core, target, mirrors, announce, referrer, priority, pick)
-  }
-
-  async addCore(
-    core,
-    target = core.key,
-    {
-      announce = false,
-      referrer = null,
-      priority = 0,
-      pick = this.pick,
-      mirrors = this.coreMirrors
-    } = {}
-  ) {
-    if (core.closing || this.closed || !mirrors.length) return []
-    if (this.mirroring.has(core)) return []
-
-    return await this._startCoreMirroring(core, target, mirrors, announce, referrer, priority, pick)
-  }
-
-  async deleteCore(key, target = key, { pick = this.pick, mirrors = this.coreMirrors } = {}) {
-    const proms = []
-    const refs = []
-    for (const mirrorKey of getClosestMirrorList(target, mirrors, pick)) {
-      const ref = this._getBlindPeer(mirrorKey)
-      proms.push(ref.peer.deleteCore(key))
-      refs.push(ref)
-    }
-
-    try {
-      await Promise.allSettled(proms)
-      return await Promise.all(proms)
-    } finally {
-      for (const ref of refs) this._releaseMirror(ref)
-    }
-  }
-
-  async _startCoreMirroring(core, target, mirrors, announce, referrer, priority, pick) {
-    this.mirroring.add(core)
-
-    try {
-      await core.ready()
-    } catch (e) {
-      safetyCatch(e)
-    }
-
-    if (!core.opened || core.closing || this.closed) {
-      this.mirroring.delete(core)
-      return []
-    }
-
-    if (!target) target = core.key
-
-    if (pick === 1) {
-      // easy case
-      return [
-        await this._mirrorCore(
-          getClosestMirror(target, mirrors),
-          core,
-          announce,
-          referrer,
-          priority
-        )
-      ]
-    }
-
-    const all = []
-    for (const mirrorKey of getClosestMirrorList(target, mirrors, pick)) {
-      all.push(this._mirrorCore(mirrorKey, core, announce, referrer, priority))
-    }
-    return Promise.all(all)
-  }
-
-  async _mirrorCore(mirrorKey, core, announce, referrer, priority) {
-    if (!mirrorKey) return
-
-    const ref = this._getBlindPeer(mirrorKey)
-
-    core.on('close', () => {
-      if (ref.cores.get(core.id) === core) ref.cores.delete(core.id)
-      this.mirroring.delete(core)
-      this._releaseMirror(ref)
-    })
-
-    ref.refs++
-    ref.cores.set(core.id, core)
-
-    try {
-      return this.passive
-        ? await ref.peer.connect()
-        : await ref.peer.addCore(core.key, { announce, referrer, priority })
-    } catch (e) {
-      safetyCatch(e)
-      // ignore
-    } finally {
-      this._releaseMirror(ref)
-    }
-  }
-
-  addAutobaseBackground(
-    base,
-    target = base.wakeupCapability && base.wakeupCapability.key,
-    { all = false, pick = this.pick, mirrors = this.autobaseMirrors } = {}
-  ) {
-    if (base.closing || this.closed || !mirrors.length) return
-
-    if (this.mirroring.has(base)) {
-      if (all) this._autobaseMirrorAll(base, target, mirrors, pick).catch(safetyCatch)
-      return
-    }
-
-    this._startAutobaseMirroring(base, target, mirrors, all, pick)
-  }
-
-  async addAutobase(
-    base,
-    target = base.wakeupCapability && base.wakeupCapability.key,
-    { all = false, pick = this.pick, mirrors = this.autobaseMirrors } = {}
-  ) {
-    if (base.closing || this.closed || !mirrors.length) return
-
-    if (this.mirroring.has(base)) {
-      return all ? this._autobaseMirrorAll(base, target, mirrors, pick) : []
-    }
-
-    return this._startAutobaseMirroring(base, target, mirrors, all, pick)
-  }
-
-  async _autobaseMirrorAll(base, target, mirrors, pick) {
-    try {
-      await base.ready()
-    } catch {
-      return
-    }
-
-    if (!base.opened || base.closing || this.closed) return
-
-    if (!target) target = base.wakeupCapability.key
-
-    const closest = getClosestMirrorList(target, mirrors, pick)
-    if (!closest.length) return []
-
-    const promises = []
-    const refs = new Set()
-
-    for (const mirrorKey of closest) {
-      const ref = this._getBlindPeer(mirrorKey)
-      refs.add(ref)
-      promises.push(this._mirrorBaseBackground(ref, base, true))
-    }
-
-    try {
-      return await Promise.all(promises)
-    } finally {
-      for (const ref of refs) this._releaseMirror(ref)
-    }
-  }
-
-  async _startAutobaseMirroring(base, target, mirrors, all, pick) {
-    this.mirroring.add(base)
-
-    try {
-      await base.ready()
-    } catch {
-      this.mirroring.delete(base)
-      return
-    }
-
-    if (!base.opened || base.closing || this.closed) {
-      this.mirroring.delete(base)
-      return
-    }
-
-    if (!target) target = base.wakeupCapability.key
-
-    const closest = getClosestMirrorList(target, mirrors, pick)
-    if (!closest.length) return []
-
-    const promises = []
-
-    for (const mirrorKey of closest) {
-      const ref = this._getBlindPeer(mirrorKey)
-
-      base.core.on('migrate', () => {
-        this._mirrorBaseBackground(ref, base, all)
-      })
-
-      base.on('writer', (writer) => {
-        const always = isStaticCore(writer.core) || all
-        this._mirrorBaseWriterBackground(ref, base, writer.core, always)
-      })
-
-      base.on('close', () => {
-        this.mirroring.delete(base)
-        this._releaseMirror(ref)
-      })
-
-      promises.push(this._mirrorBaseBackground(ref, base, all))
-    }
-
-    return Promise.all(promises)
-  }
-
-  async _mirrorBaseWriter(ref, base, core, always) {
-    if (ref.cores.has(core.id)) return
-
-    ref.refs++
-
-    try {
-      if (!always && core.id !== base.local.id) {
-        return
-      }
-
-      ref.cores.set(core.id, core)
-
-      core.on('close', () => {
-        if (ref.cores.get(core.id) === core) ref.cores.delete(core.id)
-      })
-
-      const referrer = base.wakeupCapability.key
-      if (this.passive) {
-        await ref.peer.connect()
-      } else {
-        await ref.peer.addCore(core.key, { announce: false, referrer, priority: 1 })
-      }
-    } finally {
-      this._releaseMirror(ref)
-    }
-  }
-
-  async _mirrorBaseWriterBackground(ref, base, core, always) {
-    try {
-      await this._mirrorBaseWriter(ref, base, core, always)
-    } catch (e) {
-      safetyCatch(e)
-    }
-  }
-
-  _addBaseCores(ref, base, all) {
-    if (this.passive) return Promise.all([ref.peer.connect()])
-
-    const promises = []
-    promises.push(this._mirrorBaseWriter(ref, base, base.local, true))
-
-    for (const writer of base.activeWriters) {
-      const always = isStaticCore(writer.core) || all
-      promises.push(this._mirrorBaseWriter(ref, base, writer.core, always))
-    }
-
-    for (const view of base.views()) {
-      promises.push(ref.peer.addCore(view.key, { announce: false, referrer: null, priority: 1 }))
-    }
-
-    return Promise.all(promises)
-  }
-
-  async _mirrorBaseBackground(ref, base, all) {
-    ref.refs++
-
-    try {
-      await base.ready()
-      if (base.closing) return
-      await this._addBaseCores(ref, base, all)
-    } catch {
-      // ignore
-    } finally {
-      this._releaseMirror(ref)
-    }
-  }
-
-  _releaseMirror(ref) {
-    if (--ref.refs) return
-    ref.gc++
-    this.pendingGC.add(ref)
-    this._startGC()
-  }
-
-  _stopGC() {
-    if (this.gcInterval) clearInterval(this.gcInterval)
-    this.gcInterval = null
+  _removeGC(peer) {
+    peer.gc = 0
+    this._gc.delete(peer)
   }
 
   _startGC() {
-    if (this.closed) return
-    if (!this.gcInterval) {
-      this.gcInterval = setInterval(this._gc.bind(this), this.gcWait)
-    }
+    if (this._gcTimer) clearInterval(this._gcTimer)
+    this._gcTimer = setInterval(this._runGCBound, this.gcWait)
+    if (this._gcTimer.unref) this._gcTimer.unref()
   }
 
-  _gc() {
+  _stopGC() {
+    if (!this._gcTimer) return
+    clearInterval(this._gcTimer)
+    this._gcTimer = null
+  }
+
+  async addAutobase(base, { target, referrer, priority, announce, pick = this.pick } = {}) {
+    await base.ready()
+    if (base.closing) return
+
+    if (!target) target = base.wakeupCapability.key
+    if (!referrer) referrer = target
+
+    const all = []
+
+    for (const key of getClosestMirrorList(target, this.keys, pick)) {
+      const peer = this._getBlindPeer(key)
+      peer.addAutobase(base, { referrer, priority, announce })
+      all.push(peer)
+    }
+
+    for (const peer of all) await peer.connecting
+  }
+
+  _runGC() {
     const close = []
-    for (const ref of this.pendingGC) {
-      const uploaded = getBlocksUploadedTo(ref.peer.stream)
-      if (uploaded !== ref.uploaded) {
-        ref.uploaded = uploaded
-        ref.gc = ref.gc < 2 ? 1 : ref.gc - 1
+    for (const peer of this._gc) {
+      const uploaded = peer.channel ? getBlocksUploadedTo(peer.channel.stream) : 0
+      if (uploaded !== peer.uploaded) {
+        peer.uploaded = uploaded
+        peer.gc = peer.gc < 2 ? 1 : peer.gc - 1
         continue
       }
-      ref.gc++
+      peer.gc++
       // 10 strikes is ~4-8s of inactivity
-      if (ref.gc >= 4) close.push(ref)
+      if (peer.gc >= 4) close.push(peer)
     }
 
-    for (const ref of close) {
-      const id = b4a.toString(ref.peer.remotePublicKey, 'hex')
-      this.blindPeersByKey.delete(id)
-      ref.peer.close().catch(noop)
-      this.pendingGC.delete(ref)
+    for (const peer of close) {
+      const id = b4a.toString(peer.remotePublicKey, 'hex')
+      this.blindPeers.delete(id)
+      peer.destroy()
+      this._gc.delete(peer)
+    }
+
+    if (this._gc.size === 0) this._stopGC()
+  }
+
+  _getBlindPeer(key) {
+    const id = b4a.toString(key, 'hex')
+    let peer = this.blindPeers.get(id)
+    if (peer) return peer
+    peer = new BlindPeer(this, key)
+    this.blindPeers.set(id, peer)
+    return peer
+  }
+
+  addAutobaseBackground(base, opts) {
+    this.addAutobase(base, opts).catch(safetyCatch)
+  }
+
+  async addCore(core, { target, referrer, priority, announce, pick = this.pick } = {}) {
+    await core.ready()
+    if (core.closing) return
+
+    if (!target) target = core.key
+
+    const all = []
+
+    for (const key of getClosestMirrorList(target, this.keys, pick)) {
+      const peer = this._getBlindPeer(key)
+      peer.addCore(core, { referrer, priority, announce })
+      all.push(peer)
+    }
+
+    for (const peer of all) await peer.connecting
+  }
+
+  addCoreBackground(core, opts) {
+    this.addCore(core, opts).catch(safetyCatch)
+  }
+
+  close() {
+    this._stopGC()
+    this.dht.off('network-change', this._bumpBound)
+    for (const peer of this.blindPeers.values()) peer.destroy()
+    this.blindPeers.clear()
+    return Promise.resolve() // atm nothing async but keep signature
+  }
+}
+
+class BlindPeer {
+  constructor(peering, remotePublicKey) {
+    this.peering = peering
+    this.remotePublicKey = remotePublicKey
+    this.gc = 0
+    this.uploaded = 0
+    this.connects = 0
+    this.cores = new Map()
+    this.bases = new Map()
+
+    this.channel = null
+    this.socket = null
+    this.connected = false
+    this.connecting = null
+    this.suspended = peering.suspended
+    this.destroyed = false
+    this.needsFlush = false
+    this.backoff = new Backoff(DEFAULT_BACKOFF)
+  }
+
+  async suspend() {
+    if (this.suspended) return
+    this.suspended = true
+    this.backoff.destroy()
+    if (this.channel) this.channel.close()
+    if (this.socket) this.socket.destroy()
+    if (this.connecting) await this._connecting
+  }
+
+  async resume() {
+    if (!this.suspended) return
+    this.suspended = false
+    this.backoff = new Backoff(DEFAULT_BACKOFF)
+    this.update()
+  }
+
+  bump({ force = false } = {}) {
+    if (this.suspended || this.destroyed) return
+    if (force && this.channel) this.channel.close()
+    else if (this.socket) this.socket.sendKeepAlive()
+    const backoff = this.backoff
+    this.backoff = new Backoff(DEFAULT_BACKOFF)
+    backoff.destroy()
+    this.update()
+  }
+
+  async connect() {
+    if (this.connecting) return this.connecting
+    if (this.connected) return
+
+    this.connecting = this._connect()
+
+    try {
+      await this.connecting
+    } finally {
+      this.connecting = null
     }
   }
 
-  _getBlindPeer(mirrorKey) {
-    const id = b4a.toString(mirrorKey, 'hex')
+  _backgroundConnect() {
+    this.connect().catch(safetyCatch)
+  }
 
-    let ref = this.blindPeersByKey.get(id)
+  _active() {
+    return !this.destroyed && !this.suspended && !this.peering.dht.destroyed && this.hasRef()
+  }
 
-    if (!ref) {
-      const peer = new BlindPeerClient(mirrorKey, this.swarm.dht, {
-        suspended: this.suspended,
-        relayThrough: this.relayThrough
+  async _connect() {
+    this.backoff.reset()
+    this.connects++
+    this.needsFlush = true
+
+    for (let runs = 0; this._active(); runs++) {
+      if (runs > 0) {
+        await this.backoff.run()
+        if (!this._active()) break
+      }
+
+      const socket = this.peering.dht.connect(this.remotePublicKey, {
+        keyPair: this.peering.keyPair,
+        relayThrough: this.peering.relayThrough
       })
-      peer.on('stream', (stream) => {
-        this.store.replicate(stream)
-        if (this.wakeup) this.wakeup.addStream(stream)
 
-        for (const core of ref.cores.values()) {
-          if (core.closing || core.closed) continue
-          core.replicate(stream)
+      const channel = new BlindPeerMuxer(socket, {
+        onclose: (remote) => {
+          const connected = this.connected
+          socket.destroy()
+          this.connected = false
+          if (connected && this._active()) this._backgroundConnect()
         }
       })
-      ref = { refs: 0, gc: 0, uploaded: 0, peer, cores: new Map() }
-      this.blindPeersByKey.set(id, ref)
+
+      // always set this so we can nuke it if we want
+      this.socket = socket
+      this.channel = channel
+      this.onstream(socket)
+
+      await socket.opened
+
+      // check if all is good
+      if (!socket.destroying && !socket.destroyed) {
+        this.connected = true
+        break
+      }
     }
 
-    if (ref.gc) this.pendingGC.delete(ref)
+    if (!this.connected || !this._active()) {
+      this.connected = false
+      if (this.channel) this.channel.close()
+      return
+    }
 
-    ref.refs++
-    ref.gc = 0
-
-    return ref
+    this.update()
   }
+
+  hasRef() {
+    return this.cores.size + this.bases.size > 0
+  }
+
+  _flushCore(core, info) {
+    const batch = {
+      priority: info.priority,
+      referrer: info.referrer,
+      announce: info.announce,
+      cores: [],
+      visited: new Set()
+    }
+
+    addCore(batch, core.key, core.length)
+    info.flushed = this.connects
+    this.channel.addCores(batch)
+  }
+
+  _flushAutobase(base, info) {
+    const batch = {
+      priority: info.priority,
+      referrer: info.referrer,
+      announce: info.announce,
+      cores: [],
+      visited: new Set()
+    }
+
+    addAllCores(batch, base, false)
+    info.flushed = this.connects
+    this.channel.addCores(batch)
+  }
+
+  _flush() {
+    if (!this.connected) return
+
+    this.needsFlush = false
+
+    const total = this.cores.size + this.bases.size
+
+    if (total > 1) this.channel.cork()
+
+    for (const [core, info] of this.cores) {
+      if (info.flushed === this.connects) continue
+      this._flushCore(core, info)
+    }
+
+    for (const [base, info] of this.bases) {
+      if (info.flushed === this.connects) continue
+      this._flushAutobase(base, info)
+    }
+
+    if (total > 1) this.channel.uncork()
+  }
+
+  update() {
+    if (this.destroyed || this.suspended || this.peering.dht.destroyed) return
+
+    if (this.hasRef() && !this.connected) {
+      this._backgroundConnect()
+    }
+
+    if (this.connected && this.needsFlush) {
+      this._flush()
+    }
+
+    if (this.hasRef()) {
+      if (this.gc) this.peering._removeGC(this)
+    } else {
+      if (!this.gc) this.peering._addGC(this)
+    }
+  }
+
+  onstream(stream) {
+    this.peering.store.replicate(stream)
+    if (this.peering.wakeup) this.peering.wakeup.addStream(stream)
+  }
+
+  addCore(core, { referrer = null, priority = 1, announce = false } = {}) {
+    if (this.cores.has(core)) return
+
+    const info = { priority, announce, referrer, flushed: 0 }
+    this.cores.set(core, info)
+
+    core.on('close', () => {
+      if (this.cores.get(core) !== info) return
+      this.cores.delete(core)
+      this.update()
+    })
+
+    if (this.connected) this._flushCore(core, info)
+
+    this.update()
+  }
+
+  addAutobase(base, { referrer = null, priority = 1, announce = false } = {}) {
+    if (this.bases.has(base)) return
+
+    const info = { priority, announce, referrer, flushed: 0 }
+    this.bases.set(base, info)
+
+    base.on('close', () => {
+      this.bases.delete(base)
+      this.update()
+    })
+
+    base.on('writer', (writer) => {
+      if (this.cores.has(writer.core)) return
+      // TODO: what we should do here instead is wait a bit and see if the blind peer
+      // is swarming this writer with us, if not, addCore it. mega scale
+      this.addCore(writer.core, { referrer, priority })
+    })
+
+    base.core.on('migrate', () => {
+      this._mirrorAutobase(base)
+    })
+
+    if (this.connected) this._flushAutobase(base, info)
+
+    this.update()
+  }
+
+  destroy() {
+    this.destroyed = true
+    this.backoff.destroy()
+    if (this.channel) this.channel.close()
+    if (this.socket) this.socket.destroy()
+  }
+}
+
+module.exports = BlindPeering
+
+function addAllCores(batch, base, all) {
+  addCore(batch, base.local)
+
+  for (const view of base.views()) {
+    addCore(batch, view.key, view.length)
+  }
+
+  const overflow = []
+
+  for (const writer of base.activeWriters) {
+    if (isStaticCore(writer.core) || all || batch.cores.length < MAX_BATCH_MIN) {
+      addCore(batch, writer.core.key, writer.core.length)
+    } else {
+      overflow.push(writer.core)
+    }
+  }
+
+  for (let i = 0; i < overflow.length && batch.cores.length < MAX_BATCH_MAX; i++) {
+    const next = i + Math.floor(Math.random() * (overflow.length - i))
+    const core = overflow[next]
+    addCore(batch, core.key, core.length)
+    overflow[next] = overflow[i]
+  }
+}
+
+function addCore(batch, key, length) {
+  const id = b4a.toString(key, 'hex')
+
+  if (batch.visited.has(id)) return
+  batch.visited.add(id)
+
+  batch.cores.push({ key, length })
+}
+
+function isStaticCore(core) {
+  return !!core.manifest && core.manifest.signers.length === 0
 }
 
 function getBlocksUploadedTo(stream) {
@@ -468,25 +474,3 @@ function getClosestMirrorList(key, list, n) {
 
   return list.slice(0, n)
 }
-
-function getClosestMirror(key, list) {
-  if (!list || !list.length) return null
-
-  let result = null
-  let current = null
-
-  for (let i = 0; i < list.length; i++) {
-    const next = xorDistance(list[i], key)
-    if (current && xorDistance.gt(next, current)) continue
-    current = next
-    result = list[i]
-  }
-
-  return result
-}
-
-function isStaticCore(core) {
-  return !!core.manifest && core.manifest.signers.length === 0
-}
-
-function noop() {}
