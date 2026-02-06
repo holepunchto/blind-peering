@@ -353,7 +353,7 @@ class BlindPeer {
     if (this.peering.wakeup) this.peering.wakeup.addStream(stream)
   }
 
-  addCore(core, { referrer = null, priority = 1, announce = false } = {}) {
+  addCore(core, { referrer = null, priority = 0, announce = false } = {}) {
     if (this.cores.has(core)) return
 
     const info = { priority, announce, referrer, flushed: 0 }
