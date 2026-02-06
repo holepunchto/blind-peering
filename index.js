@@ -17,7 +17,9 @@ class BlindPeering {
       keys = [],
       gcWait = 2000,
       pick = 2,
-      relayThrough = null
+      relayThrough = null,
+      maxBatchMin = MAX_BATCH_MIN,
+      maxBatchMax = MAX_BATCH_MAX
     } = opts
 
     this.dht = dht
@@ -30,6 +32,8 @@ class BlindPeering {
     this.pick = pick
     this.relayThrough = relayThrough
     this.blindPeers = new Map()
+    this.maxBatchMin = maxBatchMin
+    this.maxBatchMax = maxBatchMax
 
     this._gc = new Set()
     this._gcTimer = null
@@ -48,6 +52,28 @@ class BlindPeering {
   setKeys(keys) {
     this.keys = keys.map(ID.decode)
     // TODO: rebalance
+  }
+
+  suspend() {
+    this.suspended = true
+    this._stopGC()
+
+    const suspending = []
+    for (const bp of this.blindPeers.values()) {
+      suspending.push(bp.suspend())
+    }
+    return Promise.all(suspending)
+  }
+
+  resume() {
+    this.suspended = false
+    if (this._gc.size) this._startGC()
+
+    const resuming = []
+    for (const bp of this.blindPeers.values()) {
+      resuming.push(bp.resume())
+    }
+    return Promise.all(resuming)
   }
 
   _addGC(peer) {
@@ -303,7 +329,7 @@ class BlindPeer {
       visited: new Set()
     }
 
-    addAllCores(batch, base, false)
+    addAllCores(batch, base, false, this.peering.maxBatchMin, this.peering.maxBatchMax)
     info.flushed = this.connects
     this.channel.addCores(batch)
   }
@@ -407,24 +433,24 @@ class BlindPeer {
 
 module.exports = BlindPeering
 
-function addAllCores(batch, base, all) {
+function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
   addCore(batch, base.local.key, base.local.length)
 
   for (const view of base.views()) {
-    addCore(batch, view.key, view.length)
+    addCore(batch, view.key, view.signedLength)
   }
 
   const overflow = []
 
   for (const writer of base.activeWriters) {
-    if (isStaticCore(writer.core) || all || batch.cores.length < MAX_BATCH_MIN) {
+    if (isStaticCore(writer.core) || all || batch.cores.length < maxBatchMin) {
       addCore(batch, writer.core.key, writer.core.length)
     } else {
       overflow.push(writer.core)
     }
   }
 
-  for (let i = 0; i < overflow.length && batch.cores.length < MAX_BATCH_MAX; i++) {
+  for (let i = 0; i < overflow.length && batch.cores.length < maxBatchMax; i++) {
     const next = i + Math.floor(Math.random() * (overflow.length - i))
     const core = overflow[next]
     addCore(batch, core.key, core.length)
