@@ -148,10 +148,7 @@ class BlindPeering {
     const id = b4a.toString(key, 'hex')
     let peer = this.blindPeers.get(id)
     if (peer) return peer
-    peer = new BlindPeer(this, key, {
-      maxBatchMin: this.maxBatchMin,
-      maxBatchMax: this.maxBatchMax
-    })
+    peer = new BlindPeer(this, key)
     this.blindPeers.set(id, peer)
     return peer
   }
@@ -332,11 +329,7 @@ class BlindPeer {
       visited: new Set()
     }
 
-    addAllCores(batch, base, {
-      all: false,
-      maxBatchMin: this.peering.maxBatchMin,
-      maxBatchMax: this.peering.maxBatchMax
-    })
+    addAllCores(batch, base, false, this.peering.maxBatchMin, this.peering.maxBatchMax)
     info.flushed = this.connects
     this.channel.addCores(batch)
   }
@@ -440,7 +433,7 @@ class BlindPeer {
 
 module.exports = BlindPeering
 
-function addAllCores(batch, base, { all, maxBatchMin, maxBatchMax } = {}) {
+function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
   addCore(batch, base.local.key, base.local.length)
 
   for (const view of base.views()) {
