@@ -180,6 +180,7 @@ class BlindPeering {
 
   close() {
     this._stopGC()
+    this._gc = new Set()
     this.dht.off('network-change', this._bumpBound)
     for (const peer of this.blindPeers.values()) peer.destroy()
     this.blindPeers.clear()
