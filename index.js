@@ -408,7 +408,7 @@ class BlindPeer {
 module.exports = BlindPeering
 
 function addAllCores(batch, base, all) {
-  addCore(batch, base.local)
+  addCore(batch, base.local.key, base.local.length)
 
   for (const view of base.views()) {
     addCore(batch, view.key, view.length)
