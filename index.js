@@ -191,7 +191,7 @@ class BlindPeering {
 }
 
 class BlindPeer {
-  constructor(peering, remotePublicKey, { maxBatchMin, maxBatchMax } = {}) {
+  constructor(peering, remotePublicKey) {
     this.peering = peering
     this.remotePublicKey = remotePublicKey
     this.gc = 0
@@ -199,8 +199,6 @@ class BlindPeer {
     this.connects = 0
     this.cores = new Map()
     this.bases = new Map()
-    this.maxBatchMin = maxBatchMin
-    this.maxBatchMax = maxBatchMax
 
     this.channel = null
     this.socket = null
@@ -336,8 +334,8 @@ class BlindPeer {
 
     addAllCores(batch, base, {
       all: false,
-      maxBatchMin: this.maxBatchMin,
-      maxBatchMax: this.maxBatchMax
+      maxBatchMin: this.peering.maxBatchMin,
+      maxBatchMax: this.peering.maxBatchMax
     })
     info.flushed = this.connects
     this.channel.addCores(batch)
