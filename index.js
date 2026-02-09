@@ -157,7 +157,7 @@ class BlindPeering {
     this.addAutobase(base, opts).catch(safetyCatch)
   }
 
-  async addCore(core, { target, referrer, priority, announce, pick = this.pick } = {}) {
+  async addCore(core, { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}) {
     await core.ready()
     if (core.closing) return
 
@@ -165,7 +165,7 @@ class BlindPeering {
 
     const all = []
 
-    for (const key of getClosestMirrorList(target, this.keys, pick)) {
+    for (const key of getClosestMirrorList(target, keys, pick)) {
       const peer = this._getBlindPeer(key)
       peer.addCore(core, { referrer, priority, announce })
       all.push(peer)
