@@ -409,7 +409,6 @@ class BlindPeer {
     })
 
     base.on('writer', (writer) => {
-      if (this.cores.has(writer.core)) return
       // TODO: what we should do here instead is wait a bit and see if the blind peer
       // is swarming this writer with us, if not, addCore it. mega scale
       this.addCore(writer.core, { referrer, priority })
