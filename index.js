@@ -415,7 +415,7 @@ class BlindPeer {
     })
 
     base.core.on('migrate', () => {
-      this._mirrorAutobase(base)
+      if (this.connected) this._flushAutobase(base, info)
     })
 
     if (this.connected) this._flushAutobase(base, info)
