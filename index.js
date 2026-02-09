@@ -102,7 +102,7 @@ class BlindPeering {
     this._gcTimer = null
   }
 
-  async addAutobase(base, { target, referrer, priority, announce, pick = this.pick } = {}) {
+  async addAutobase(base, { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}) {
     await base.ready()
     if (base.closing) return
 
@@ -111,7 +111,7 @@ class BlindPeering {
 
     const all = []
 
-    for (const key of getClosestMirrorList(target, this.keys, pick)) {
+    for (const key of getClosestMirrorList(target, keys, pick)) {
       const peer = this._getBlindPeer(key)
       peer.addAutobase(base, { referrer, priority, announce })
       all.push(peer)
