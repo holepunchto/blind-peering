@@ -102,7 +102,10 @@ class BlindPeering {
     this._gcTimer = null
   }
 
-  async addAutobase(base, { target, referrer, priority, announce, pick = this.pick } = {}) {
+  async addAutobase(
+    base,
+    { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}
+  ) {
     await base.ready()
     if (base.closing) return
 
@@ -111,7 +114,7 @@ class BlindPeering {
 
     const all = []
 
-    for (const key of getClosestMirrorList(target, this.keys, pick)) {
+    for (const key of getClosestMirrorList(target, keys, pick)) {
       const peer = this._getBlindPeer(key)
       peer.addAutobase(base, { referrer, priority, announce })
       all.push(peer)
@@ -157,7 +160,10 @@ class BlindPeering {
     this.addAutobase(base, opts).catch(safetyCatch)
   }
 
-  async addCore(core, { target, referrer, priority, announce, pick = this.pick } = {}) {
+  async addCore(
+    core,
+    { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}
+  ) {
     await core.ready()
     if (core.closing) return
 
@@ -165,7 +171,7 @@ class BlindPeering {
 
     const all = []
 
-    for (const key of getClosestMirrorList(target, this.keys, pick)) {
+    for (const key of getClosestMirrorList(target, keys, pick)) {
       const peer = this._getBlindPeer(key)
       peer.addCore(core, { referrer, priority, announce })
       all.push(peer)
@@ -416,6 +422,11 @@ class BlindPeer {
 
     base.core.on('migrate', () => {
       if (this.connected) this._flushAutobase(base, info)
+      // TODO: cleanly (this is a hack to fix a bug where base.key has not yet rotated to the new one when this event is emitted
+      setTimeout(() => {
+        if (!this.connected) return
+        return this._flushAutobase(base, info)
+      }, 500)
     })
 
     if (this.connected) this._flushAutobase(base, info)
