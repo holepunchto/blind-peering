@@ -423,7 +423,10 @@ class BlindPeer {
     base.core.on('migrate', () => {
       if (this.connected) this._flushAutobase(base, info)
       // TODO: cleanly (this is a hack to fix a bug where base.key has not yet rotated to the new one when this event is emitted
-      setTimeout(() => this._flushAutobase(base, info), 500)
+      setTimeout(() => {
+        if (!this.connected) return
+        return this._flushAutobase(base, info)
+      }, 500)
     })
 
     if (this.connected) this._flushAutobase(base, info)
