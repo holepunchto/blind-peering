@@ -102,7 +102,10 @@ class BlindPeering {
     this._gcTimer = null
   }
 
-  async addAutobase(base, { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}) {
+  async addAutobase(
+    base,
+    { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}
+  ) {
     await base.ready()
     if (base.closing) return
 
@@ -157,7 +160,10 @@ class BlindPeering {
     this.addAutobase(base, opts).catch(safetyCatch)
   }
 
-  async addCore(core, { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}) {
+  async addCore(
+    core,
+    { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}
+  ) {
     await core.ready()
     if (core.closing) return
 
@@ -415,12 +421,9 @@ class BlindPeer {
     })
 
     base.core.on('migrate', () => {
-      base.core.on('migrate', () => {
       if (this.connected) this._flushAutobase(base, info)
-        // TODO: cleanly (this is a hack to fix a bug where base.key has not yet rotated to the new one when this event is emitted
+      // TODO: cleanly (this is a hack to fix a bug where base.key has not yet rotated to the new one when this event is emitted
       setTimeout(() => this._flushAutobase(base, info), 500)
-    })
-
     })
 
     if (this.connected) this._flushAutobase(base, info)
