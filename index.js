@@ -35,6 +35,12 @@ class BlindPeering {
     this.maxBatchMin = maxBatchMin
     this.maxBatchMax = maxBatchMax
 
+    this.stats = {
+      addAutobase: 0,
+      addCore: 0,
+      addCoresTx: 0
+    }
+
     this._gc = new Set()
     this._gcTimer = null
     this._runGCBound = this._runGC.bind(this)
@@ -325,6 +331,7 @@ class BlindPeer {
     addCore(batch, core.key, core.length)
     info.flushed = this.connects
     this.channel.addCores(batch)
+    this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
   _flushAutobase(base, info) {
@@ -339,6 +346,7 @@ class BlindPeer {
     addAllCores(batch, base, false, this.peering.maxBatchMin, this.peering.maxBatchMax)
     info.flushed = this.connects
     this.channel.addCores(batch)
+    this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
   _flush() {
@@ -388,6 +396,7 @@ class BlindPeer {
 
   addCore(core, { referrer = null, priority = 0, announce = false } = {}) {
     if (this.cores.has(core)) return
+    this.peering.stats.addCore++
 
     const info = { priority, announce, referrer, flushed: 0 }
     this.cores.set(core, info)
@@ -405,6 +414,7 @@ class BlindPeer {
 
   addAutobase(base, { referrer = null, priority = 1, announce = false } = {}) {
     if (this.bases.has(base)) return
+    this.peering.stats.addAutobase++
 
     const info = { priority, announce, referrer, flushed: 0 }
     this.bases.set(base, info)
