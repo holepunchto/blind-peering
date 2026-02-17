@@ -431,11 +431,14 @@ class BlindPeer {
     })
 
     base.core.on('migrate', () => {
-      // TODO: cleanly (this is a hack to fix a bug where base.key has not yet rotated to the new one when this event is emitted
+      // TODO: cleanly
+      // Context: the views have not yet rotated after 'migrate' triggers. For that, we need to wait for the 'reboot' event.
+      // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
+      // This hack makes it so that in practice we only flush after the reboot
       setTimeout(() => {
-        if (!this.connected) return
+        if (!this.connected || this.peering.closed) return
         return this._flushAutobase(base, info)
-      }, 500)
+      }, 500).unref()
     })
 
     if (this.connected) this._flushAutobase(base, info)
