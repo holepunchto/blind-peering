@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "format": "prettier --write .",
-    "test": "prettier --check"
+    "test": "prettier --check . && lunte"
   },
   "files": [
     "lib/",
@@ -13,13 +13,9 @@
   ],
   "dependencies": {
     "b4a": "^1.6.7",
-    "blind-peer-encodings": "^3.1.0",
-    "compact-encoding": "^2.16.0",
+    "blind-peer-muxer": "^1.0.0",
     "hypercore-id-encoding": "^1.3.0",
-    "protomux-rpc": "^1.7.0",
-    "ready-resource": "^1.1.2",
     "safety-catch": "^1.0.2",
-    "signal-promise": "^1.0.3",
     "xor-distance": "^2.0.0"
   },
   "repository": {
@@ -33,6 +29,7 @@
   },
   "homepage": "https://github.com/holepunchto/blind-peering",
   "devDependencies": {
+    "lunte": "^1.6.0",
     "prettier": "^3.6.2",
     "prettier-config-holepunch": "^2.0.0"
   }

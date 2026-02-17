@@ -10,17 +10,17 @@ npm install blind-peering
 
 ## API
 
-#### `const blindPeering = new BlindPeering(swarm, store, opts)`
+#### `const blindPeering = new BlindPeering(dht, store, opts)`
 
-Create a new Blind Peering instance. `swarm` is a hyperswarm instance and `store` is a Corestore instance.
+Create a new Blind Peering instance. `dht` is a HyperDHT instance and `store` is a Corestore instance.
 
 `opts` include:
 
-- `mirrors`: a list of blind peer keys (mirrors) to use. You should always set this, otherwise there are no mirrors to contact.
+- `keys`: a list of blind peer keys (mirrors) to use. You should always set this, otherwise there are no mirrors to contact.
 - `suspended`: whether to start in suspended state (default `false`)
 - `wakeup`: a Wakeup object
 
-#### `await blindPeering.addCore(core, target = core.key, opts)`
+#### `await blindPeering.addCore(core, { target = core.key, ...opts })`
 
 Add a Hypercore to a blind peer.
 
@@ -33,11 +33,11 @@ Add a Hypercore to a blind peer.
 - `referrer`: key of a referrer hypercore to pass to the blind peer
 - `priority`: integer indicating the priority to request. See Blind Peer for the possibilities
 
-#### `blindPeering.addCoreBackground(core, target = core.key, opts)`
+#### `blindPeering.addCoreBackground(core, { target = core.key, ...opts })`
 
 Same as `addCore`, but is sync (it runs in the background).
 
-#### `await blindPeering.addAutobase(base, target)`
+#### `await blindPeering.addAutobase(base, { target, ...opts })`
 
 Add an autobase to a blind peer.
 
@@ -45,7 +45,7 @@ Add an autobase to a blind peer.
 
 `target` is an optional key. It looks for blind peers 'close' (using XOR distance) to that key. It defaults to the autobase's `wakeupCapability.key`.
 
-#### `blindPeering.addAutobaseBackground(base, target)`
+#### `blindPeering.addAutobaseBackground(base, { target, ...opts })`
 
 Add an autobase to a blind peer (runs in the background).
 
