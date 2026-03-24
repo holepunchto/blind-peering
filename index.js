@@ -37,6 +37,7 @@ class BlindPeering {
 
     this.stats = {
       addAutobase: 0,
+      addAutobee: 0,
       addCore: 0,
       addCoresTx: 0
     }
@@ -129,6 +130,27 @@ class BlindPeering {
     for (const peer of all) await peer.connecting
   }
 
+  async addAutobee(
+    auto,
+    { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}
+  ) {
+    await auto.ready()
+    if (auto.closing) return
+
+    if (!target) target = auto.key
+    if (!referrer) referrer = target
+
+    const all = []
+
+    for (const key of getClosestMirrorList(target, keys, pick)) {
+      const peer = this._getBlindPeer(key)
+      peer.addAutobee(auto, { referrer, priority, announce })
+      all.push(peer)
+    }
+
+    for (const peer of all) await peer.connecting
+  }
+
   _runGC() {
     const close = []
     for (const peer of this._gc) {
@@ -164,6 +186,10 @@ class BlindPeering {
 
   addAutobaseBackground(base, opts) {
     this.addAutobase(base, opts).catch(safetyCatch)
+  }
+
+  addAutobeeBackground(auto, opts) {
+    this.addAutobee(auto, opts).catch(safetyCatch)
   }
 
   async addCore(
@@ -209,6 +235,7 @@ class BlindPeer {
     this.connects = 0
     this.cores = new Map()
     this.bases = new Map()
+    this.autos = new Map()
 
     this.channel = null
     this.socket = null
@@ -316,7 +343,7 @@ class BlindPeer {
   }
 
   hasRef() {
-    return this.cores.size + this.bases.size > 0
+    return this.cores.size + this.bases.size + this.autos.size > 0
   }
 
   _flushCore(core, info) {
@@ -349,12 +376,27 @@ class BlindPeer {
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
+  _flushAutobee(auto, info) {
+    const batch = {
+      priority: info.priority,
+      referrer: info.referrer,
+      announce: info.announce,
+      cores: [],
+      visited: new Set()
+    }
+
+    addAutobeeCores(batch, auto, false, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    info.flushed = this.connects
+    this.channel.addCores(batch)
+    this.peering.stats.addCoresTx++ // TODO: track elsewhere
+  }
+
   _flush() {
     if (!this.connected) return
 
     this.needsFlush = false
 
-    const total = this.cores.size + this.bases.size
+    const total = this.cores.size + this.bases.size + this.autos.size
 
     if (total > 1) this.channel.cork()
 
@@ -366,6 +408,11 @@ class BlindPeer {
     for (const [base, info] of this.bases) {
       if (info.flushed === this.connects) continue
       this._flushAutobase(base, info)
+    }
+
+    for (const [auto, info] of this.autos) {
+      if (info.flushed === this.connects) continue
+      this._flushAutobee(auto, info)
     }
 
     if (total > 1) this.channel.uncork()
@@ -446,6 +493,25 @@ class BlindPeer {
     this.update()
   }
 
+  addAutobee(auto, { referrer = null, priority = 1, announce = false } = {}) {
+    if (this.autos.has(auto)) return
+    this.peering.stats.addAutobee++
+
+    const info = { priority, announce, referrer, flushed: 0 }
+    this.autos.set(auto, info)
+
+    auto.on('close', () => {
+      this.autos.delete(auto)
+      this.update()
+    })
+
+    // @todo `auto.on('writer')`
+
+    if (this.connected) this._flushAutobee(auto, info)
+
+    this.update()
+  }
+
   destroy() {
     this.destroyed = true
     this.backoff.destroy()
@@ -455,6 +521,25 @@ class BlindPeer {
 }
 
 module.exports = BlindPeering
+
+function addAutobeeCores(batch, auto, all, maxBatchMin, maxBatchMax) {
+  addCore(batch, auto.local.key, auto.local.length)
+
+  // add views if indexer
+  if (auto.isIndexer) {
+    addCore(batch, auto._workingBee.core.key, auto._workingBee.core.signedLength)
+    addCore(batch, auto.system.bee.core.key, auto.system.bee.core.signedLength)
+  }
+
+  const overflow = []
+
+  for (let i = 0; i < overflow.length && batch.cores.length < maxBatchMax; i++) {
+    const next = i + Math.floor(Math.random() * (overflow.length - i))
+    const core = overflow[next]
+    addCore(batch, core.key, core.length)
+    overflow[next] = overflow[i]
+  }
+}
 
 function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
   addCore(batch, base.local.key, base.local.length)
