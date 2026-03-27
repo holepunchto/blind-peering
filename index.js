@@ -8,6 +8,8 @@ const Backoff = require('./lib/backoff.js')
 const DEFAULT_BACKOFF = [1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000]
 const MAX_BATCH_MIN = 32
 const MAX_BATCH_MAX = 64
+const BATCH_IDLE_WAIT = 2000
+const BATCH_MAX_WAIT = 10_000
 
 class BlindPeering {
   constructor(dht, store, opts = {}) {
@@ -19,7 +21,9 @@ class BlindPeering {
       pick = 2,
       relayThrough = null,
       maxBatchMin = MAX_BATCH_MIN,
-      maxBatchMax = MAX_BATCH_MAX
+      maxBatchMax = MAX_BATCH_MAX,
+      batchIdleWait = BATCH_IDLE_WAIT,
+      batchMaxWait = BATCH_MAX_WAIT
     } = opts
 
     this.dht = dht
@@ -34,6 +38,8 @@ class BlindPeering {
     this.blindPeers = new Map()
     this.maxBatchMin = maxBatchMin
     this.maxBatchMax = maxBatchMax
+    this.batchIdleWait = batchIdleWait
+    this.batchMaxWait = batchMaxWait
 
     this.stats = {
       addAutobase: 0,
@@ -334,16 +340,14 @@ class BlindPeer {
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
-  _flushAutobase(base, info) {
+  _flushAutobase(info) {
     const batch = {
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
-      cores: [],
-      visited: new Set()
+      cores: info.cores
     }
 
-    addAllCores(batch, base, false, this.peering.maxBatchMin, this.peering.maxBatchMax)
     info.flushed = this.connects
     this.channel.addCores(batch)
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
@@ -363,9 +367,9 @@ class BlindPeer {
       this._flushCore(core, info)
     }
 
-    for (const [base, info] of this.bases) {
+    for (const [_, info] of this.bases) {
       if (info.flushed === this.connects) continue
-      this._flushAutobase(base, info)
+      this._flushAutobase(info)
     }
 
     if (total > 1) this.channel.uncork()
@@ -416,34 +420,64 @@ class BlindPeer {
     if (this.bases.has(base)) return
     this.peering.stats.addAutobase++
 
-    const info = { priority, announce, referrer, flushed: 0 }
+    const info = {
+      priority,
+      announce,
+      referrer,
+      flushed: 0,
+      cores: [],
+      visited: new Set(),
+      readyToFlush: false,
+      flushTimeout: null
+    }
     this.bases.set(base, info)
 
-    base.on('close', () => {
-      this.bases.delete(base)
+    addAllCores(info, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
+
+    let maxTimeout = null
+
+    const onWriter = (writer) => {
+      if (info.readyToFlush) return
+      addCore(info, writer.core.key, writer.core.length)
+      clearTimeout(info.flushTimeout)
+      info.flushTimeout = setTimeout(prepareFlush, this.peering.batchIdleWait)
+    }
+
+    const prepareFlush = () => {
+      if (info.readyToFlush) return // already called
+      info.readyToFlush = true
+      this.needsFlush = true
+      clearTimeout(info.flushTimeout)
+      clearTimeout(maxTimeout)
+      base.off('writer', onWriter)
       this.update()
+    }
+
+    base.on('close', () => {
+      prepareFlush()
+      this.bases.delete(base)
     })
 
-    base.on('writer', (writer) => {
-      // TODO: what we should do here instead is wait a bit and see if the blind peer
-      // is swarming this writer with us, if not, addCore it. mega scale
-      this.addCore(writer.core, { referrer, priority })
-    })
-
+    // On migrate: add it again with the new views
     base.core.on('migrate', () => {
-      // TODO: cleanly
+      prepareFlush() // Flush previous
+      this.bases.delete(base)
       // Context: the views have not yet rotated after 'migrate' triggers. For that, we need to wait for the 'reboot' event.
       // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
       // This hack makes it so that in practice we only flush after the reboot
       setTimeout(() => {
-        if (!this.connected || this.peering.closed) return
-        return this._flushAutobase(base, info)
+        if (!this.connected || this.peering.closed || base.closed) return
+        this.addAutobase(base, { referrer, priority, announce })
       }, 500).unref()
     })
 
-    if (this.connected) this._flushAutobase(base, info)
-
-    this.update()
+    if (info.cores.length >= this.peering.maxBatchMin) {
+      prepareFlush()
+    } else {
+      maxTimeout = setTimeout(prepareFlush, this.peering.batchMaxWait)
+      info.flushTimeout = setTimeout(prepareFlush, this.peering.batchIdleWait)
+      base.on('writer', onWriter)
+    }
   }
 
   destroy() {
@@ -456,7 +490,7 @@ class BlindPeer {
 
 module.exports = BlindPeering
 
-function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
+function addAllCores(batch, base, maxBatchMin, maxBatchMax) {
   addCore(batch, base.local.key, base.local.length)
 
   for (const view of base.views()) {
@@ -466,7 +500,7 @@ function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
   const overflow = []
 
   for (const writer of base.activeWriters) {
-    if (isStaticCore(writer.core) || all || batch.cores.length < maxBatchMin) {
+    if (isStaticCore(writer.core) || batch.cores.length < maxBatchMin) {
       addCore(batch, writer.core.key, writer.core.length)
     } else {
       overflow.push(writer.core)
