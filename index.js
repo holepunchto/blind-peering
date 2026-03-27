@@ -471,7 +471,7 @@ class BlindPeer {
       }, 500).unref()
     })
 
-    if (info.cores.length >= this.peering.maxBatchMin) {
+    if (info.cores.length >= this.peering.maxBatchMax) {
       prepareFlush()
     } else {
       maxTimeout = setTimeout(prepareFlush, this.peering.batchMaxWait)
