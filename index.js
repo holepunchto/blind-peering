@@ -447,6 +447,10 @@ class BlindPeer {
     const onWriter = (writer) => {
       if (info.readyToFlush) return // race condition
       addCore(info, writer.core.key, writer.core.length)
+      if (info.cores.length >= this.peering.maxBatchMax) {
+        prepareFlush()
+        return
+      }
       clearTimeout(info.flushTimeout)
       info.flushTimeout = setTimeout(prepareFlush, this.peering.batchIdleWait)
     }
