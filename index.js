@@ -472,7 +472,7 @@ class BlindPeer {
       // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
       // This hack makes it so that in practice we only flush after the reboot
       setTimeout(() => {
-        if (!this.connected || this.peering.closed || base.closed) return
+        if (this.destroyed || !this.connected || this.peering.closed || base.closed) return
         this.addAutobase(base, { referrer, priority, announce })
       }, 500).unref()
     })
