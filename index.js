@@ -224,6 +224,8 @@ class BlindPeer {
     this.destroyed = false
     this.needsFlush = false
     this.backoff = new Backoff(DEFAULT_BACKOFF)
+
+    this._pendingFlushes = new Map()
   }
 
   async suspend() {
@@ -428,13 +430,19 @@ class BlindPeer {
       cores: [],
       visited: new Set(),
       readyToFlush: false,
-      flushTimeout: null
+      flushTimeout: null,
+      maxTimeout: null,
+      cleanup: () => {
+        this._pendingFlushes.delete(base)
+        this.needsFlush = true
+        clearTimeout(info.flushTimeout)
+        clearTimeout(info.maxTimeout)
+        base.off('writer', onWriter)
+      }
     }
     this.bases.set(base, info)
 
     addAllCores(info, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
-
-    let maxTimeout = null
 
     const onWriter = (writer) => {
       if (info.readyToFlush) return // race condition
@@ -444,12 +452,10 @@ class BlindPeer {
     }
 
     const prepareFlush = () => {
+      if (this.destroyed) return
       if (info.readyToFlush) return // already called
       info.readyToFlush = true
-      this.needsFlush = true
-      clearTimeout(info.flushTimeout)
-      clearTimeout(maxTimeout)
-      base.off('writer', onWriter)
+      info.cleanup()
       this.update()
     }
 
@@ -474,7 +480,8 @@ class BlindPeer {
     if (info.cores.length >= this.peering.maxBatchMax) {
       prepareFlush()
     } else {
-      maxTimeout = setTimeout(prepareFlush, this.peering.batchMaxWait)
+      this._pendingFlushes.set(base, info)
+      info.maxTimeout = setTimeout(prepareFlush, this.peering.batchMaxWait)
       info.flushTimeout = setTimeout(prepareFlush, this.peering.batchIdleWait)
       base.on('writer', onWriter)
     }
@@ -482,6 +489,7 @@ class BlindPeer {
 
   destroy() {
     this.destroyed = true
+    for (const info of this._pendingFlushes.values()) info.cleanup()
     this.backoff.destroy()
     if (this.channel) this.channel.close()
     if (this.socket) this.socket.destroy()
