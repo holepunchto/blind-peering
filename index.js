@@ -6,8 +6,8 @@ const safetyCatch = require('safety-catch')
 const Backoff = require('./lib/backoff.js')
 
 const DEFAULT_BACKOFF = [1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000]
-const MAX_BATCH_MIN = 32
-const MAX_BATCH_MAX = 64
+const MAX_BATCH_MIN = 6
+const MAX_BATCH_MAX = 8
 const BATCH_IDLE_WAIT = 2000
 const BATCH_MAX_WAIT = 10_000
 
@@ -437,7 +437,7 @@ class BlindPeer {
     let maxTimeout = null
 
     const onWriter = (writer) => {
-      if (info.readyToFlush) return
+      if (info.readyToFlush) return // race condition
       addCore(info, writer.core.key, writer.core.length)
       clearTimeout(info.flushTimeout)
       info.flushTimeout = setTimeout(prepareFlush, this.peering.batchIdleWait)
