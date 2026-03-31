@@ -342,13 +342,13 @@ class BlindPeer {
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
-  _flushAutobase(base, info) {
+  _flushAutobase(base, info, visited = new Set()) {
     const batch = {
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
       cores: [],
-      visited: info.visited || new Set()
+      visited
     }
 
     addAllCores(batch, base, false, this.peering.maxBatchMin, this.peering.maxBatchMax)
@@ -358,6 +358,8 @@ class BlindPeer {
 
     this.channel.addCores(batch)
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
+
+    return batch
   }
 
   _flush() {
@@ -435,7 +437,6 @@ class BlindPeer {
       flushedWriterBatch: false,
       flushTimeout: null,
       maxTimeout: null,
-      visited: new Set(),
       cleanup: () => {
         this._pendingFlushes.delete(base)
         clearTimeout(info.flushTimeout)
@@ -444,6 +445,8 @@ class BlindPeer {
       }
     }
     this.bases.set(base, info)
+
+    const visited = new Set() // to avoid duplicates when sending the writer batch
 
     const onwriter = () => {
       if (info.flushedWriterBatch) return // race condition
@@ -457,7 +460,7 @@ class BlindPeer {
       info.flushedWriterBatch = true
       info.cleanup()
       if (this.connected) {
-        this._flushAutobase(base, info)
+        this._flushAutobase(base, info, visited)
       } else {
         this.update()
       }
@@ -476,7 +479,6 @@ class BlindPeer {
       // This hack makes it so that in practice we only flush after the reboot
       setTimeout(() => {
         if (this.peering.closed) return
-        info.visited = null // Re-add everything
         if (this.connected) {
           return this._flushAutobase(base, info)
         }
@@ -485,7 +487,8 @@ class BlindPeer {
     })
 
     if (this.connected) {
-      this._flushAutobase(base, info)
+      // TODO: look into passing visited for the not-connected case (to dedup writers for that case too)
+      this._flushAutobase(base, info, visited)
     }
 
     // Schedule a second flush for any additional writer cores we discover
