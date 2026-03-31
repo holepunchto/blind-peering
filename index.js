@@ -8,6 +8,8 @@ const Backoff = require('./lib/backoff.js')
 const DEFAULT_BACKOFF = [1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000]
 const MAX_BATCH_MIN = 32
 const MAX_BATCH_MAX = 64
+const BATCH_IDLE_WAIT = 2000
+const BATCH_MAX_WAIT = 10_000
 
 class BlindPeering {
   constructor(dht, store, opts = {}) {
@@ -19,7 +21,9 @@ class BlindPeering {
       pick = 2,
       relayThrough = null,
       maxBatchMin = MAX_BATCH_MIN,
-      maxBatchMax = MAX_BATCH_MAX
+      maxBatchMax = MAX_BATCH_MAX,
+      batchIdleWait = BATCH_IDLE_WAIT,
+      batchMaxWait = BATCH_MAX_WAIT
     } = opts
 
     this.dht = dht
@@ -34,6 +38,8 @@ class BlindPeering {
     this.blindPeers = new Map()
     this.maxBatchMin = maxBatchMin
     this.maxBatchMax = maxBatchMax
+    this.batchIdleWait = batchIdleWait
+    this.batchMaxWait = batchMaxWait
 
     this.stats = {
       addAutobase: 0,
@@ -218,6 +224,8 @@ class BlindPeer {
     this.destroyed = false
     this.needsFlush = false
     this.backoff = new Backoff(DEFAULT_BACKOFF)
+
+    this._pendingFlushes = new Map()
   }
 
   async suspend() {
@@ -340,11 +348,14 @@ class BlindPeer {
       referrer: info.referrer,
       announce: info.announce,
       cores: [],
-      visited: new Set()
+      visited: info.visited || new Set()
     }
 
     addAllCores(batch, base, false, this.peering.maxBatchMin, this.peering.maxBatchMax)
     info.flushed = this.connects
+
+    if (batch.cores.length === 0) return
+
     this.channel.addCores(batch)
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
@@ -416,18 +427,46 @@ class BlindPeer {
     if (this.bases.has(base)) return
     this.peering.stats.addAutobase++
 
-    const info = { priority, announce, referrer, flushed: 0 }
+    const info = {
+      priority,
+      announce,
+      referrer,
+      flushed: 0,
+      flushedWriterBatch: false,
+      flushTimeout: null,
+      maxTimeout: null,
+      visited: new Set(),
+      cleanup: () => {
+        this._pendingFlushes.delete(base)
+        clearTimeout(info.flushTimeout)
+        clearTimeout(info.maxTimeout)
+        base.off('writer', onwriter)
+      }
+    }
     this.bases.set(base, info)
 
+    const onwriter = () => {
+      if (info.flushedWriterBatch) return // race condition
+      clearTimeout(info.flushTimeout)
+      info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
+    }
+
+    const flushWriterBatch = () => {
+      if (this.destroyed) return
+      if (info.flushedWriterBatch) return
+      info.flushedWriterBatch = true
+      info.cleanup()
+      if (this.connected) {
+        this._flushAutobase(base, info)
+      } else {
+        this.update()
+      }
+    }
+
     base.on('close', () => {
+      info.cleanup() // We can't reasonable flush anymore: no guarantees on core lengths etc of closed cores
       this.bases.delete(base)
       this.update()
-    })
-
-    base.on('writer', (writer) => {
-      // TODO: what we should do here instead is wait a bit and see if the blind peer
-      // is swarming this writer with us, if not, addCore it. mega scale
-      this.addCore(writer.core, { referrer, priority })
     })
 
     base.core.on('migrate', () => {
@@ -436,18 +475,31 @@ class BlindPeer {
       // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
       // This hack makes it so that in practice we only flush after the reboot
       setTimeout(() => {
-        if (!this.connected || this.peering.closed) return
-        return this._flushAutobase(base, info)
+        if (this.peering.closed) return
+        info.visited = null // Re-add everything
+        if (this.connected) {
+          return this._flushAutobase(base, info)
+        }
+        return this.update()
       }, 500).unref()
     })
 
-    if (this.connected) this._flushAutobase(base, info)
+    if (this.connected) {
+      this._flushAutobase(base, info)
+    }
+
+    // Schedule a second flush for any additional writer cores we discover
+    this._pendingFlushes.set(base, info)
+    info.maxTimeout = setTimeout(flushWriterBatch, this.peering.batchMaxWait)
+    info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
+    base.on('writer', onwriter)
 
     this.update()
   }
 
   destroy() {
     this.destroyed = true
+    for (const info of this._pendingFlushes.values()) info.cleanup()
     this.backoff.destroy()
     if (this.channel) this.channel.close()
     if (this.socket) this.socket.destroy()
