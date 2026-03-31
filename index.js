@@ -511,13 +511,18 @@ module.exports = BlindPeering
 function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
   addCore(batch, base.local.key, base.local.length)
 
+  const viewKeys = new Set()
   for (const view of base.views()) {
+    // console.log('-', view.key.toString('hex'), 'view')
+    viewKeys.add(view.key.toString('hex'))
     addCore(batch, view.key, view.signedLength)
   }
 
   const overflow = []
 
   for (const writer of base.activeWriters) {
+    if (viewKeys.has(writer.core.key.toString('hex'))) console.log('VIEW KEY IS WRITER!')
+    // console.log('-', writer.core.key.toString('hex'), 'writer')
     if (isStaticCore(writer.core) || all || batch.cores.length < maxBatchMin) {
       addCore(batch, writer.core.key, writer.core.length)
     } else {
