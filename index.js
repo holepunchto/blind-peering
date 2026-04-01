@@ -6,8 +6,8 @@ const safetyCatch = require('safety-catch')
 const Backoff = require('./lib/backoff.js')
 
 const DEFAULT_BACKOFF = [1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000]
-const MAX_BATCH_MIN = 32
-const MAX_BATCH_MAX = 64
+const MAX_BATCH_MIN = 6
+const MAX_BATCH_MAX = 12
 const BATCH_IDLE_WAIT = 2000
 const BATCH_MAX_WAIT = 10_000
 
@@ -351,7 +351,7 @@ class BlindPeer {
       visited
     }
 
-    addAllCores(batch, base, false, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addAllCores(batch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
     info.flushed = this.connects
 
     if (batch.cores.length === 0) return
@@ -510,7 +510,7 @@ class BlindPeer {
 
 module.exports = BlindPeering
 
-function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
+function addAllCores(batch, base, maxBatchMin, maxBatchMax) {
   addCore(batch, base.local.key, base.local.length)
 
   for (const view of base.views()) {
@@ -518,13 +518,30 @@ function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
   }
 
   const overflow = []
-
+  const priorityOverflow = []
   for (const writer of base.activeWriters) {
-    if (isStaticCore(writer.core) || all || batch.cores.length < maxBatchMin) {
+    // remoteContiguousLength === 0 means no peer we ever met acknowledged they have the first block
+    if (
+      isStaticCore(writer.core) ||
+      writer.core.remoteContiguousLength === 0 ||
+      batch.cores.length < maxBatchMin
+    ) {
       addCore(batch, writer.core.key, writer.core.length)
     } else {
-      overflow.push(writer.core)
+      // No peer we ever met acknowledged they have all blocks (meaning blind peer needs to download it)
+      if (writer.core.length > writer.core.remoteContiguousLength) {
+        priorityOverflow.push(writer.core)
+      } else {
+        overflow.push(writer.core)
+      }
     }
+  }
+
+  for (let i = 0; i < priorityOverflow.length && batch.cores.length < maxBatchMax; i++) {
+    const next = i + Math.floor(Math.random() * (priorityOverflow.length - i))
+    const core = priorityOverflow[next]
+    addCore(batch, core.key, core.length)
+    priorityOverflow[next] = priorityOverflow[i]
   }
 
   for (let i = 0; i < overflow.length && batch.cores.length < maxBatchMax; i++) {
