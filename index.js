@@ -491,7 +491,8 @@ class BlindPeer {
       this._flushAutobase(base, info, visited)
     }
 
-    // Schedule a second flush for any additional writer cores we discover
+    // Optimisation: schedule a second flush for any additional writer cores we discover
+    // Note: we only do this once. Writers appearing later need to be added by others
     this._pendingFlushes.set(base, info)
     info.maxTimeout = setTimeout(flushWriterBatch, this.peering.batchMaxWait)
     info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
