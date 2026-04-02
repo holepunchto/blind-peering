@@ -6,8 +6,10 @@ const safetyCatch = require('safety-catch')
 const Backoff = require('./lib/backoff.js')
 
 const DEFAULT_BACKOFF = [1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000]
-const MAX_BATCH_MIN = 32
-const MAX_BATCH_MAX = 64
+const MAX_BATCH_MIN = 6
+const MAX_BATCH_MAX = 12
+const BATCH_IDLE_WAIT = 2000
+const BATCH_MAX_WAIT = 10_000
 
 class BlindPeering {
   constructor(dht, store, opts = {}) {
@@ -19,7 +21,9 @@ class BlindPeering {
       pick = 2,
       relayThrough = null,
       maxBatchMin = MAX_BATCH_MIN,
-      maxBatchMax = MAX_BATCH_MAX
+      maxBatchMax = MAX_BATCH_MAX,
+      batchIdleWait = BATCH_IDLE_WAIT,
+      batchMaxWait = BATCH_MAX_WAIT
     } = opts
 
     this.dht = dht
@@ -34,6 +38,8 @@ class BlindPeering {
     this.blindPeers = new Map()
     this.maxBatchMin = maxBatchMin
     this.maxBatchMax = maxBatchMax
+    this.batchIdleWait = batchIdleWait
+    this.batchMaxWait = batchMaxWait
 
     this.stats = {
       addAutobase: 0,
@@ -218,6 +224,8 @@ class BlindPeer {
     this.destroyed = false
     this.needsFlush = false
     this.backoff = new Backoff(DEFAULT_BACKOFF)
+
+    this._pendingFlushes = new Map()
   }
 
   async suspend() {
@@ -334,17 +342,20 @@ class BlindPeer {
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
-  _flushAutobase(base, info) {
+  _flushAutobase(base, info, visited = new Set()) {
     const batch = {
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
       cores: [],
-      visited: new Set()
+      visited
     }
 
-    addAllCores(batch, base, false, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addAllCores(batch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
     info.flushed = this.connects
+
+    if (batch.cores.length === 0) return
+
     this.channel.addCores(batch)
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
@@ -416,18 +427,47 @@ class BlindPeer {
     if (this.bases.has(base)) return
     this.peering.stats.addAutobase++
 
-    const info = { priority, announce, referrer, flushed: 0 }
+    const info = {
+      priority,
+      announce,
+      referrer,
+      flushed: 0,
+      flushedWriterBatch: false,
+      flushTimeout: null,
+      maxTimeout: null,
+      cleanup: () => {
+        this._pendingFlushes.delete(base)
+        clearTimeout(info.flushTimeout)
+        clearTimeout(info.maxTimeout)
+        base.off('writer', onwriter)
+      }
+    }
     this.bases.set(base, info)
 
+    const visited = new Set() // to avoid duplicates when sending the writer batch
+
+    const onwriter = () => {
+      if (info.flushedWriterBatch) return // race condition
+      clearTimeout(info.flushTimeout)
+      info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
+    }
+
+    const flushWriterBatch = () => {
+      if (this.destroyed) return
+      if (info.flushedWriterBatch) return
+      info.flushedWriterBatch = true
+      info.cleanup()
+      if (this.connected) {
+        this._flushAutobase(base, info, visited)
+      } else {
+        this.update()
+      }
+    }
+
     base.on('close', () => {
+      info.cleanup() // We can't reasonable flush anymore: no guarantees on core lengths etc of closed cores
       this.bases.delete(base)
       this.update()
-    })
-
-    base.on('writer', (writer) => {
-      // TODO: what we should do here instead is wait a bit and see if the blind peer
-      // is swarming this writer with us, if not, addCore it. mega scale
-      this.addCore(writer.core, { referrer, priority })
     })
 
     base.core.on('migrate', () => {
@@ -436,18 +476,32 @@ class BlindPeer {
       // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
       // This hack makes it so that in practice we only flush after the reboot
       setTimeout(() => {
-        if (!this.connected || this.peering.closed) return
-        return this._flushAutobase(base, info)
+        if (this.peering.closed) return
+        if (this.connected) {
+          return this._flushAutobase(base, info)
+        }
+        return this.update()
       }, 500).unref()
     })
 
-    if (this.connected) this._flushAutobase(base, info)
+    if (this.connected) {
+      // TODO: look into passing visited for the not-connected case (to dedup writers for that case too)
+      this._flushAutobase(base, info, visited)
+    }
+
+    // Optimisation: schedule a second flush for any additional writer cores we discover
+    // Note: we only do this once. Writers appearing later need to be added by others
+    this._pendingFlushes.set(base, info)
+    info.maxTimeout = setTimeout(flushWriterBatch, this.peering.batchMaxWait)
+    info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
+    base.on('writer', onwriter)
 
     this.update()
   }
 
   destroy() {
     this.destroyed = true
+    for (const info of this._pendingFlushes.values()) info.cleanup()
     this.backoff.destroy()
     if (this.channel) this.channel.close()
     if (this.socket) this.socket.destroy()
@@ -456,7 +510,7 @@ class BlindPeer {
 
 module.exports = BlindPeering
 
-function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
+function addAllCores(batch, base, maxBatchMin, maxBatchMax) {
   addCore(batch, base.local.key, base.local.length)
 
   for (const view of base.views()) {
@@ -464,13 +518,30 @@ function addAllCores(batch, base, all, maxBatchMin, maxBatchMax) {
   }
 
   const overflow = []
-
+  const priorityOverflow = []
   for (const writer of base.activeWriters) {
-    if (isStaticCore(writer.core) || all || batch.cores.length < maxBatchMin) {
+    // remoteContiguousLength === 0 means no peer we ever met acknowledged they have the first block
+    if (
+      isStaticCore(writer.core) ||
+      writer.core.remoteContiguousLength === 0 ||
+      batch.cores.length < maxBatchMin
+    ) {
       addCore(batch, writer.core.key, writer.core.length)
     } else {
-      overflow.push(writer.core)
+      // No peer we ever met acknowledged they have all blocks (meaning blind peer needs to download it)
+      if (writer.core.length > writer.core.remoteContiguousLength) {
+        priorityOverflow.push(writer.core)
+      } else {
+        overflow.push(writer.core)
+      }
     }
+  }
+
+  for (let i = 0; i < priorityOverflow.length && batch.cores.length < maxBatchMax; i++) {
+    const next = i + Math.floor(Math.random() * (priorityOverflow.length - i))
+    const core = priorityOverflow[next]
+    addCore(batch, core.key, core.length)
+    priorityOverflow[next] = priorityOverflow[i]
   }
 
   for (let i = 0; i < overflow.length && batch.cores.length < maxBatchMax; i++) {
