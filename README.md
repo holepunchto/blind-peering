@@ -37,6 +37,16 @@ Add a Hypercore to a blind peer.
 
 Same as `addCore`, but is sync (it runs in the background).
 
+#### `await blindPeering.sendNotification(core, { roomKey = core.key, roomDiscoveryKey, index = core.length - 1, target = core.key, ...opts })`
+
+Ask the closest blind peer to create a `blind-push` notification for `core` and forward it to its configured push gateway.
+
+This requires that the target blind peer already has the core or autobase attached for replication.
+
+#### `blindPeering.sendNotificationBackground(core, opts)`
+
+Same as `sendNotification`, but runs in the background.
+
 #### `await blindPeering.addAutobase(base, { target, ...opts })`
 
 Add an autobase to a blind peer.
