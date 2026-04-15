@@ -1,7 +1,7 @@
 const BlindPeerMuxer = require('blind-peer-muxer')
 const xorDistance = require('xor-distance')
 const b4a = require('b4a')
-const crypto = require('hypercore-crypto')
+const hcCrypto = require('hypercore-crypto')
 const ID = require('hypercore-id-encoding')
 const HyperDHTAddress = require('hyperdht-address')
 const safetyCatch = require('safety-catch')
@@ -213,8 +213,8 @@ class BlindPeering {
     core,
     {
       roomKey = core.key,
-      roomDiscoveryKey = crypto.discoveryKey(roomKey),
-      index = core.length - 1,
+      roomDiscoveryKey = hcCrypto.discoveryKey(roomKey),
+      index = null,
       target = core.key,
       keys = this.keys,
       version = 0,
@@ -222,7 +222,7 @@ class BlindPeering {
     } = {}
   ) {
     await core.ready()
-    if (index < 0) return // can happen when send empty core
+    if (index === null) index = core.length - 1
 
     const request = {
       block: {
@@ -238,7 +238,6 @@ class BlindPeering {
     }
 
     const [key] = getClosestMirrorList(target, keys, 1)
-    if (!key) return
 
     const peer = this._getBlindPeer(key)
     await peer.sendNotification(request)
