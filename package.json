@@ -14,7 +14,6 @@
   "dependencies": {
     "b4a": "^1.6.7",
     "blind-peer-muxer": "^1.3.0",
-    "blind-push": "^0.2.3",
     "hypercore-crypto": "^3.5.0",
     "hypercore-id-encoding": "^1.3.0",
     "hyperdht": "^6.30.0",
