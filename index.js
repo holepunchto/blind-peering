@@ -32,7 +32,9 @@ class BlindPeering {
     this.suspended = suspended
     this.closed = false
     this.wakeup = wakeup
-    this.keys = keys
+    const [decodedKeys, keyToEncodedKey] = keys.reduce(decodeKey, [[], new Map()])
+    this.keys = decodedKeys
+    this.keyToEncodedKey = keyToEncodedKey
     this.gcWait = gcWait
     this.pick = pick
     this.relayThrough = relayThrough
@@ -63,7 +65,9 @@ class BlindPeering {
   }
 
   setKeys(keys) {
-    this.keys = keys
+    const [decodedKeys, keyToEncodedKey] = keys.reduce(decodeKey, [[], new Map()])
+    this.keys = decodedKeys
+    this.keyToEncodedKey = keyToEncodedKey
     // TODO: rebalance
   }
 
@@ -128,7 +132,7 @@ class BlindPeering {
     const all = []
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
-      const peer = this._getBlindPeer(key)
+      const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
       peer.addAutobase(base, { referrer, priority, announce })
       all.push(peer)
     }
@@ -185,7 +189,7 @@ class BlindPeering {
     const all = []
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
-      const peer = this._getBlindPeer(key)
+      const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
       peer.addCore(core, { referrer, priority, announce })
       all.push(peer)
     }
@@ -584,7 +588,7 @@ function getClosestMirrorList(key, list, n) {
   for (let i = 0; i < n; i++) {
     let current = null
     for (let j = i; j < list.length; j++) {
-      const next = xorDistance(decodeKey(list[j]).key, key)
+      const next = xorDistance(list[j], key)
       if (current && xorDistance.gt(next, current)) continue
       const tmp = list[i]
       list[i] = list[j]
@@ -596,6 +600,9 @@ function getClosestMirrorList(key, list, n) {
   return list.slice(0, n)
 }
 
-function decodeKey(encodedKey) {
-  return HyperDHTAddress.decode(b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey))
+function decodeKey([keys, keyToEncodedKey], encodedKey) {
+  const { key } = HyperDHTAddress.decode(b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey))
+  keys.push(key)
+  keyToEncodedKey.set(key, encodedKey)
+  return [keys, keyToEncodedKey]
 }
