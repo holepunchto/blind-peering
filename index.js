@@ -2,6 +2,7 @@ const BlindPeerMuxer = require('blind-peer-muxer')
 const xorDistance = require('xor-distance')
 const b4a = require('b4a')
 const ID = require('hypercore-id-encoding')
+const HyperDHTAddress = require('hyperdht-address')
 const safetyCatch = require('safety-catch')
 const Backoff = require('./lib/backoff.js')
 
@@ -31,7 +32,7 @@ class BlindPeering {
     this.suspended = suspended
     this.closed = false
     this.wakeup = wakeup
-    this.keys = keys.map(ID.decode)
+    this.keys = keys
     this.gcWait = gcWait
     this.pick = pick
     this.relayThrough = relayThrough
@@ -62,7 +63,7 @@ class BlindPeering {
   }
 
   setKeys(keys) {
-    this.keys = keys.map(ID.decode)
+    this.keys = keys
     // TODO: rebalance
   }
 
@@ -583,7 +584,7 @@ function getClosestMirrorList(key, list, n) {
   for (let i = 0; i < n; i++) {
     let current = null
     for (let j = i; j < list.length; j++) {
-      const next = xorDistance(list[j], key)
+      const next = xorDistance(decodeKey(list[j]).key, key)
       if (current && xorDistance.gt(next, current)) continue
       const tmp = list[i]
       list[i] = list[j]
@@ -593,4 +594,8 @@ function getClosestMirrorList(key, list, n) {
   }
 
   return list.slice(0, n)
+}
+
+function decodeKey(encodedKey) {
+  return HyperDHTAddress.decode(b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey))
 }
