@@ -527,7 +527,6 @@ class BlindPeer {
 
 module.exports = BlindPeering
 
-
 function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
   addCore(batch, auto.local.key, auto.local.length)
 
