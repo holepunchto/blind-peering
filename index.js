@@ -327,7 +327,7 @@ class BlindPeer {
     return this.cores.size + this.bases.size > 0
   }
 
-  _flushCore(core, info) {
+  _flushCore(core, info, wakeup = true) {
     const batch = {
       priority: info.priority,
       referrer: info.referrer,
@@ -336,14 +336,14 @@ class BlindPeer {
       visited: new Set()
     }
 
-    addCore(batch, core.key, core.length)
+    addCore(batch, core.key, core.length, wakeup)
     info.flushed = this.connects
     this.channel.addCores(batch)
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
   _flushAutobase(auto, info, visited = new Set()) {
-    const writers = {
+    const batch = {
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
@@ -351,26 +351,14 @@ class BlindPeer {
       visited
     }
 
-    const views = {
-      priority: info.priority,
-      referrer: info.referrer,
-      announce: info.announce,
-      cores: [],
-      noWakeup: true,
-      visited
-    }
-
-    addWriterCores(writers, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
-    addViewCores(views, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addWriterCores(batch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addViewCores(batch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
 
     info.flushed = this.connects
 
-    if (writers.cores.length === 0 && views.cores.length === 0) return
+    if (batch.cores.length === 0) return
 
-    this.channel.addCores(views)
-    this.peering.stats.addCoresTx++ // TODO: track elsewhere
-
-    this.channel.addCores(writers)
+    this.channel.addCores(batch)
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
@@ -528,7 +516,7 @@ class BlindPeer {
 module.exports = BlindPeering
 
 function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
-  addCore(batch, auto.local.key, auto.local.length)
+  addCore(batch, auto.local.key, auto.local.length, true)
 
   const overflow = []
   const priorityOverflow = []
@@ -567,17 +555,17 @@ function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
 
 function addViewCores(batch, auto, maxBatchMin, maxBatchMax) {
   for (const view of auto.views()) {
-    addCore(batch, view.key, view.length)
+    addCore(batch, view.key, view.length, false)
   }
 }
 
-function addCore(batch, key, length) {
+function addCore(batch, key, length, wakeup) {
   const id = b4a.toString(key, 'hex')
 
   if (batch.visited.has(id)) return
   batch.visited.add(id)
 
-  batch.cores.push({ key, length })
+  batch.cores.push({ key, length, wakeup })
 }
 
 function isStaticCore(core) {
