@@ -360,8 +360,8 @@ class BlindPeer {
       visited
     }
 
-    addAllWriterCores(writers, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
-    addAllViewCores(views, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addWriterCores(writers, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addViewCores(views, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
 
     info.flushed = this.connects
 
@@ -528,7 +528,7 @@ class BlindPeer {
 module.exports = BlindPeering
 
 
-function addAllWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
+function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
   addCore(batch, auto.local.key, auto.local.length)
 
   const overflow = []
@@ -566,7 +566,7 @@ function addAllWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
   }
 }
 
-function addAllViewCores(batch, auto, maxBatchMin, maxBatchMax) {
+function addViewCores(batch, auto, maxBatchMin, maxBatchMax) {
   for (const view of auto.views()) {
     addCore(batch, view.key, view.length)
   }
