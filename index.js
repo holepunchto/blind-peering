@@ -10,6 +10,7 @@ const MAX_BATCH_MIN = 6
 const MAX_BATCH_MAX = 12
 const BATCH_IDLE_WAIT = 2000
 const BATCH_MAX_WAIT = 10_000
+const BLIND_PEER_VERSION = 1
 
 class BlindPeering {
   constructor(dht, store, opts = {}) {
@@ -329,6 +330,7 @@ class BlindPeer {
 
   _flushCore(core, info, wakeup = true) {
     const batch = {
+      version: BLIND_PEER_VERSION,
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
@@ -344,6 +346,7 @@ class BlindPeer {
 
   _flushAutobase(auto, info, visited = new Set()) {
     const batch = {
+      version: BLIND_PEER_VERSION,
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
