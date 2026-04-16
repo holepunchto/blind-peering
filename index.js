@@ -115,20 +115,20 @@ class BlindPeering {
   }
 
   async addAutobase(
-    base,
+    auto,
     { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}
   ) {
-    await base.ready()
-    if (base.closing) return
+    await auto.ready()
+    if (auto.closing) return
 
-    if (!target) target = base.wakeupCapability.key
+    if (!target) target = auto.wakeupCapability.key
     if (!referrer) referrer = target
 
     const all = []
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
       const peer = this._getBlindPeer(key)
-      peer.addAutobase(base, { referrer, priority, announce })
+      peer.addAutobase(auto, { referrer, priority, announce })
       all.push(peer)
     }
 
@@ -168,8 +168,8 @@ class BlindPeering {
     return peer
   }
 
-  addAutobaseBackground(base, opts) {
-    this.addAutobase(base, opts).catch(safetyCatch)
+  addAutobaseBackground(auto, opts) {
+    this.addAutobase(auto, opts).catch(safetyCatch)
   }
 
   async addCore(
@@ -342,8 +342,8 @@ class BlindPeer {
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
-  _flushAutobase(base, info, visited = new Set()) {
-    const batch = {
+  _flushAutobase(auto, info, visited = new Set()) {
+    const writers = {
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
@@ -351,12 +351,26 @@ class BlindPeer {
       visited
     }
 
-    addAllCores(batch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    const views = {
+      priority: info.priority,
+      referrer: info.referrer,
+      announce: info.announce,
+      cores: [],
+      noWakeup: true,
+      visited
+    }
+
+    addAllWriterCores(writers, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addAllViewCores(views, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+
     info.flushed = this.connects
 
-    if (batch.cores.length === 0) return
+    if (writers.cores.length === 0 && views.cores.length === 0) return
 
-    this.channel.addCores(batch)
+    this.channel.addCores(views)
+    this.peering.stats.addCoresTx++ // TODO: track elsewhere
+
+    this.channel.addCores(writers)
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
@@ -374,9 +388,9 @@ class BlindPeer {
       this._flushCore(core, info)
     }
 
-    for (const [base, info] of this.bases) {
+    for (const [auto, info] of this.bases) {
       if (info.flushed === this.connects) continue
-      this._flushAutobase(base, info)
+      this._flushAutobase(auto, info)
     }
 
     if (total > 1) this.channel.uncork()
@@ -423,8 +437,8 @@ class BlindPeer {
     this.update()
   }
 
-  addAutobase(base, { referrer = null, priority = 1, announce = false } = {}) {
-    if (this.bases.has(base)) return
+  addAutobase(auto, { referrer = null, priority = 1, announce = false } = {}) {
+    if (this.bases.has(auto)) return
     this.peering.stats.addAutobase++
 
     const info = {
@@ -436,13 +450,13 @@ class BlindPeer {
       flushTimeout: null,
       maxTimeout: null,
       cleanup: () => {
-        this._pendingFlushes.delete(base)
+        this._pendingFlushes.delete(auto)
         clearTimeout(info.flushTimeout)
         clearTimeout(info.maxTimeout)
-        base.off('writer', onwriter)
+        auto.off('writer', onwriter)
       }
     }
-    this.bases.set(base, info)
+    this.bases.set(auto, info)
 
     const visited = new Set() // to avoid duplicates when sending the writer batch
 
@@ -458,43 +472,46 @@ class BlindPeer {
       info.flushedWriterBatch = true
       info.cleanup()
       if (this.connected) {
-        this._flushAutobase(base, info, visited)
+        this._flushAutobase(auto, info, visited)
       } else {
         this.update()
       }
     }
 
-    base.on('close', () => {
+    auto.on('close', () => {
       info.cleanup() // We can't reasonable flush anymore: no guarantees on core lengths etc of closed cores
-      this.bases.delete(base)
+      this.bases.delete(auto)
       this.update()
     })
 
-    base.core.on('migrate', () => {
-      // TODO: cleanly
-      // Context: the views have not yet rotated after 'migrate' triggers. For that, we need to wait for the 'reboot' event.
-      // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
-      // This hack makes it so that in practice we only flush after the reboot
-      setTimeout(() => {
-        if (this.peering.closed) return
-        if (this.connected) {
-          return this._flushAutobase(base, info)
-        }
-        return this.update()
-      }, 500).unref()
-    })
+    // autobase only
+    if (auto.core) {
+      auto.core.on('migrate', () => {
+        // TODO: cleanly
+        // Context: the views have not yet rotated after 'migrate' triggers. For that, we need to wait for the 'reboot' event.
+        // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
+        // This hack makes it so that in practice we only flush after the reboot
+        setTimeout(() => {
+          if (this.peering.closed) return
+          if (this.connected) {
+            return this._flushAutobase(auto, info)
+          }
+          return this.update()
+        }, 500).unref()
+      })
+    }
 
     if (this.connected) {
       // TODO: look into passing visited for the not-connected case (to dedup writers for that case too)
-      this._flushAutobase(base, info, visited)
+      this._flushAutobase(auto, info, visited)
     }
 
     // Optimisation: schedule a second flush for any additional writer cores we discover
     // Note: we only do this once. Writers appearing later need to be added by others
-    this._pendingFlushes.set(base, info)
+    this._pendingFlushes.set(auto, info)
     info.maxTimeout = setTimeout(flushWriterBatch, this.peering.batchMaxWait)
     info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
-    base.on('writer', onwriter)
+    auto.on('writer', onwriter)
 
     this.update()
   }
@@ -510,16 +527,13 @@ class BlindPeer {
 
 module.exports = BlindPeering
 
-function addAllCores(batch, base, maxBatchMin, maxBatchMax) {
-  addCore(batch, base.local.key, base.local.length)
 
-  for (const view of base.views()) {
-    addCore(batch, view.key, view.signedLength)
-  }
+function addAllWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
+  addCore(batch, auto.local.key, auto.local.length)
 
   const overflow = []
   const priorityOverflow = []
-  for (const writer of base.activeWriters) {
+  for (const writer of auto.activeWriters) {
     // remoteContiguousLength === 0 means no peer we ever met acknowledged they have the first block
     if (
       isStaticCore(writer.core) ||
@@ -549,6 +563,12 @@ function addAllCores(batch, base, maxBatchMin, maxBatchMax) {
     const core = overflow[next]
     addCore(batch, core.key, core.length)
     overflow[next] = overflow[i]
+  }
+}
+
+function addAllViewCores(batch, auto, maxBatchMin, maxBatchMax) {
+  for (const view of auto.views()) {
+    addCore(batch, view.key, view.length)
   }
 }
 
