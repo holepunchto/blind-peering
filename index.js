@@ -32,9 +32,7 @@ class BlindPeering {
     this.suspended = suspended
     this.closed = false
     this.wakeup = wakeup
-    const [decodedKeys, keyToEncodedKey] = keys.reduce(decodeKey, [[], new Map()])
-    this.keys = decodedKeys
-    this.keyToEncodedKey = keyToEncodedKey
+    this.keyToEncodedKey = getKeysMap(keys)
     this.gcWait = gcWait
     this.pick = pick
     this.relayThrough = relayThrough
@@ -64,10 +62,12 @@ class BlindPeering {
     }
   }
 
+  get keys() {
+    return this.keyToEncodedKey.keys()
+  }
+
   setKeys(keys) {
-    const [decodedKeys, keyToEncodedKey] = keys.reduce(decodeKey, [[], new Map()])
-    this.keys = decodedKeys
-    this.keyToEncodedKey = keyToEncodedKey
+    this.keyToEncodedKey = getKeysMap(keys)
     // TODO: rebalance
   }
 
@@ -600,11 +600,14 @@ function getClosestMirrorList(key, list, n) {
   return list.slice(0, n)
 }
 
-function decodeKey([keys, keyToEncodedKey], encodedKey) {
+function decodeKey(keyToEncodedKey, encodedKey) {
   const { key } = HyperDHTAddress.decode(
     b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey)
   )
-  keys.push(key)
   keyToEncodedKey.set(key, encodedKey)
-  return [keys, keyToEncodedKey]
+  return keyToEncodedKey
+}
+
+function getKeysMap(encodedKeys) {
+  return encodedKeys.reduce(decodeKey, new Map())
 }
