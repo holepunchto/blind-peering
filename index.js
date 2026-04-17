@@ -32,7 +32,7 @@ class BlindPeering {
     this.suspended = suspended
     this.closed = false
     this.wakeup = wakeup
-    this.keyToEncodedKey = getKeysMap(keys)
+    this.setKeys(keys)
     this.gcWait = gcWait
     this.pick = pick
     this.relayThrough = relayThrough
