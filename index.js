@@ -63,7 +63,7 @@ class BlindPeering {
   }
 
   get keys() {
-    return this.keyToEncodedKey.keys()
+    return Array.from(this.keyToEncodedKey.keys())
   }
 
   setKeys(keys) {
