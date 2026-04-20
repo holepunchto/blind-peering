@@ -607,11 +607,10 @@ function getClosestMirrorList(key, list, n) {
 }
 
 function decodeKey(keyToEncodedKey, encodedKey) {
+  // Ensure its a buffer
   encodedKey = b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey)
 
-  const { key } = HyperDHTAddress.decode(
-    b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey)
-  )
+  const { key } = HyperDHTAddress.decode(encodedKey)
   keyToEncodedKey.set(key, encodedKey)
   return keyToEncodedKey
 }
