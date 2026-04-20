@@ -32,7 +32,13 @@ class BlindPeering {
     this.suspended = suspended
     this.closed = false
     this.wakeup = wakeup
+
+    // TODO: on a next major, get rid of all the work arounds
+    // for making it support both hyperdht-encoded addresses
+    // and straight keys (by always using hyperdht-encoded ones)
+    this.keyToEncodedKey = null // set next line
     this.setKeys(keys)
+
     this.gcWait = gcWait
     this.pick = pick
     this.relayThrough = relayThrough
@@ -601,6 +607,8 @@ function getClosestMirrorList(key, list, n) {
 }
 
 function decodeKey(keyToEncodedKey, encodedKey) {
+  encodedKey = b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey)
+
   const { key } = HyperDHTAddress.decode(
     b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey)
   )
