@@ -2,6 +2,7 @@ const BlindPeerMuxer = require('blind-peer-muxer')
 const xorDistance = require('xor-distance')
 const b4a = require('b4a')
 const ID = require('hypercore-id-encoding')
+const HyperDHTAddress = require('hyperdht-address')
 const safetyCatch = require('safety-catch')
 const Backoff = require('./lib/backoff.js')
 
@@ -31,7 +32,13 @@ class BlindPeering {
     this.suspended = suspended
     this.closed = false
     this.wakeup = wakeup
-    this.keys = keys.map(ID.decode)
+
+    // TODO: on a next major, get rid of all the work arounds
+    // for making it support both hyperdht-encoded addresses
+    // and straight keys (by always using hyperdht-encoded ones)
+    this.keyToEncodedKey = null // set next line
+    this.setKeys(keys)
+
     this.gcWait = gcWait
     this.pick = pick
     this.relayThrough = relayThrough
@@ -61,8 +68,12 @@ class BlindPeering {
     }
   }
 
+  get keys() {
+    return Array.from(this.keyToEncodedKey.keys())
+  }
+
   setKeys(keys) {
-    this.keys = keys.map(ID.decode)
+    this.keyToEncodedKey = getKeysMap(keys)
     // TODO: rebalance
   }
 
@@ -127,7 +138,7 @@ class BlindPeering {
     const all = []
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
-      const peer = this._getBlindPeer(key)
+      const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
       peer.addAutobase(base, { referrer, priority, announce })
       all.push(peer)
     }
@@ -184,7 +195,7 @@ class BlindPeering {
     const all = []
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
-      const peer = this._getBlindPeer(key)
+      const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
       peer.addCore(core, { referrer, priority, announce })
       all.push(peer)
     }
@@ -593,4 +604,17 @@ function getClosestMirrorList(key, list, n) {
   }
 
   return list.slice(0, n)
+}
+
+function decodeKey(keyToEncodedKey, encodedKey) {
+  // Ensure its a buffer
+  encodedKey = b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey)
+
+  const { key } = HyperDHTAddress.decode(encodedKey)
+  keyToEncodedKey.set(key, encodedKey)
+  return keyToEncodedKey
+}
+
+function getKeysMap(encodedKeys) {
+  return encodedKeys.reduce(decodeKey, new Map())
 }
