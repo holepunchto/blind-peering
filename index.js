@@ -351,8 +351,8 @@ class BlindPeer {
       visited
     }
 
-    addWriterCores(batch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
     addViewCores(batch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addWriterCores(batch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
 
     info.flushed = this.connects
 
@@ -553,13 +553,13 @@ function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
   }
 }
 
-function addViewCores(batch, auto, maxBatchMin, maxBatchMax) {
+function addViewCores(batch, auto) {
   for (const view of auto.views()) {
-    addCore(batch, view.key, view.length, false)
+    addCore(batch, view.key, view.signedLength, false)
   }
 }
 
-function addCore(batch, key, length, wakeup) {
+function addCore(batch, key, length, wakeup = true) {
   const id = b4a.toString(key, 'hex')
 
   if (batch.visited.has(id)) return
