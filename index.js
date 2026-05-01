@@ -245,7 +245,7 @@ class BlindPeer {
     this.backoff.destroy()
     if (this.channel) this.channel.close()
     if (this.socket) this.socket.destroy()
-    if (this.connecting) await this._connecting
+    if (this.connecting) await this.connecting
   }
 
   async resume() {
