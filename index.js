@@ -417,7 +417,14 @@ class BlindPeer {
   }
 
   addCore(core, { referrer = null, priority = 0, announce = false } = {}) {
-    if (this.cores.has(core)) return
+    if (this.cores.has(core)) {
+      const isReplicating = core.peers.some((peer) =>
+        b4a.equals(peer.remotePublicKey, this.remotePublicKey)
+      )
+      if (isReplicating) {
+        return
+      }
+    }
     this.peering.stats.addCore++
 
     const info = { priority, announce, referrer, flushed: 0 }
