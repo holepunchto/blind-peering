@@ -417,10 +417,13 @@ class BlindPeer {
   }
 
   addCore(core, { referrer = null, priority = 0, announce = false } = {}) {
-    if (this.cores.has(core)) return
+    const coreInfo = this.cores.get(core)
+    if (coreInfo && coreInfo.length === core.length) {
+      return
+    }
     this.peering.stats.addCore++
 
-    const info = { priority, announce, referrer, flushed: 0 }
+    const info = { priority, announce, referrer, flushed: 0, length: core.length }
     this.cores.set(core, info)
 
     core.on('close', () => {
