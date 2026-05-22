@@ -421,9 +421,7 @@ class BlindPeer {
       const isReplicating = core.peers.some((peer) =>
         b4a.equals(peer.remotePublicKey, this.remotePublicKey)
       )
-      if (isReplicating) {
-        return
-      }
+      if (isReplicating) return
     }
     this.peering.stats.addCore++
 
