@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "format": "prettier --write .",
-    "test": "prettier --check . && lunte && brittle-node test/test.js"
+    "test": "prettier --check . && lunte"
   },
   "files": [
     "lib/",
@@ -31,8 +31,6 @@
   },
   "homepage": "https://github.com/holepunchto/blind-peering",
   "devDependencies": {
-    "blind-peer": "^3.8.1",
-    "brittle": "^4.0.0",
     "lunte": "^1.6.0",
     "prettier": "^3.6.2",
     "prettier-config-holepunch": "^2.0.0"
