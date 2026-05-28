@@ -116,7 +116,15 @@ class BlindPeering {
 
   async addAutobase(
     auto,
-    { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}
+    {
+      target,
+      referrer,
+      priority,
+      announce,
+      additionalViews,
+      pick = this.pick,
+      keys = this.keys
+    } = {}
   ) {
     await auto.ready()
     if (auto.closing) return
@@ -128,7 +136,7 @@ class BlindPeering {
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
       const peer = this._getBlindPeer(key)
-      peer.addAutobase(auto, { referrer, priority, announce })
+      peer.addAutobase(auto, { referrer, priority, announce, additionalViews })
       all.push(peer)
     }
 
@@ -351,7 +359,13 @@ class BlindPeer {
       visited
     }
 
-    addViewCores(batch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addViewCores(
+      batch,
+      auto,
+      this.peering.maxBatchMin,
+      this.peering.maxBatchMax,
+      info.additionalViews
+    )
     addWriterCores(batch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
 
     info.flushed = this.connects
@@ -425,7 +439,10 @@ class BlindPeer {
     this.update()
   }
 
-  addAutobase(auto, { referrer = null, priority = 1, announce = false } = {}) {
+  addAutobase(
+    auto,
+    { referrer = null, priority = 1, announce = false, additionalViews = [] } = {}
+  ) {
     if (this.bases.has(auto)) return
     this.peering.stats.addAutobase++
 
@@ -433,6 +450,7 @@ class BlindPeer {
       priority,
       announce,
       referrer,
+      additionalViews,
       flushed: 0,
       flushedWriterBatch: false,
       flushTimeout: null,
@@ -553,8 +571,8 @@ function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
   }
 }
 
-function addViewCores(batch, auto) {
-  for (const view of auto.views()) {
+function addViewCores(batch, auto, _maxBatchMin, _maxBatchMax, additionalViews) {
+  for (const view of [...auto.views(), ...additionalViews]) {
     addCore(batch, view.key, view.signedLength, false)
   }
 }
