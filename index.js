@@ -217,7 +217,8 @@ class BlindPeering {
       index = null,
       target = core.key,
       keys = this.keys,
-      extra = null
+      extra = null,
+      appId = null
     } = {}
   ) {
     await core.ready()
@@ -232,7 +233,8 @@ class BlindPeering {
         key: roomKey,
         discoveryKey: roomDiscoveryKey
       },
-      extra
+      extra,
+      appId
     }
 
     const [key] = getClosestMirrorList(target, keys, 1)
