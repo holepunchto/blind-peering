@@ -1,6 +1,7 @@
 const BlindPeerMuxer = require('blind-peer-muxer')
 const xorDistance = require('xor-distance')
 const b4a = require('b4a')
+const hcCrypto = require('hypercore-crypto')
 const ID = require('hypercore-id-encoding')
 const HyperDHTAddress = require('hyperdht-address')
 const safetyCatch = require('safety-catch')
@@ -51,7 +52,8 @@ class BlindPeering {
     this.stats = {
       addAutobase: 0,
       addCore: 0,
-      addCoresTx: 0
+      addCoresTx: 0,
+      notificationsTx: 0
     }
 
     this._gc = new Set()
@@ -213,6 +215,44 @@ class BlindPeering {
 
   addCoreBackground(core, opts) {
     this.addCore(core, opts).catch(safetyCatch)
+  }
+
+  async sendNotification(
+    core,
+    {
+      roomKey = core.key,
+      roomDiscoveryKey = hcCrypto.discoveryKey(roomKey),
+      index = null,
+      target = core.key,
+      keys = this.keys,
+      extra = null,
+      appId = null
+    } = {}
+  ) {
+    await core.ready()
+    if (index === null) index = core.length - 1
+
+    const request = {
+      block: {
+        key: core.key,
+        index
+      },
+      destination: {
+        key: roomKey,
+        discoveryKey: roomDiscoveryKey
+      },
+      extra,
+      appId
+    }
+
+    const [key] = getClosestMirrorList(target, keys, 1)
+
+    const peer = this._getBlindPeer(key)
+    await peer.sendNotification(request)
+  }
+
+  sendNotificationBackground(core, opts) {
+    this.sendNotification(core, opts).catch(safetyCatch)
   }
 
   close() {
@@ -539,6 +579,11 @@ class BlindPeer {
     auto.on('writer', onwriter)
 
     this.update()
+  }
+
+  async sendNotification(request) {
+    await this.channel.sendNotification(request)
+    this.peering.stats.notificationsTx++
   }
 
   destroy() {
