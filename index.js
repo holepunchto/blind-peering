@@ -8,8 +8,8 @@ const safetyCatch = require('safety-catch')
 const Backoff = require('./lib/backoff.js')
 
 const DEFAULT_BACKOFF = [1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000]
-const MAX_BATCH_MIN = 6
-const MAX_BATCH_MAX = 12
+const MAX_BATCH_MIN = 3
+const MAX_BATCH_MAX = 9
 const BATCH_IDLE_WAIT = 2000
 const BATCH_MAX_WAIT = 10_000
 
@@ -394,7 +394,15 @@ class BlindPeer {
   }
 
   _flushAutobase(base, info, visited = new Set()) {
-    const batch = {
+    const viewBatch = {
+      priority: info.priority,
+      referrer: null,
+      announce: info.announce,
+      cores: [],
+      visited
+    }
+
+    const writerBatch = {
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
@@ -402,13 +410,17 @@ class BlindPeer {
       visited
     }
 
-    addAllCores(batch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addViewCores(viewBatch, base)
+    addWriterCores(writerBatch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
+
     info.flushed = this.connects
 
-    if (batch.cores.length === 0) return
+    if (writerBatch.cores.length + viewBatch.cores.length === 0) return
 
-    this.channel.addCores(batch)
-    this.peering.stats.addCoresTx++ // TODO: track elsewhere
+    this.channel.addCores(writerBatch)
+    this.channel.addCores(viewBatch)
+
+    this.peering.stats.addCoresTx += 2 // TODO: track elsewhere
   }
 
   _flush() {
@@ -574,12 +586,8 @@ class BlindPeer {
 
 module.exports = BlindPeering
 
-function addAllCores(batch, base, maxBatchMin, maxBatchMax) {
+function addWriterCores(batch, base, maxBatchMin, maxBatchMax) {
   addCore(batch, base.local.key, base.local.length)
-
-  for (const view of base.views()) {
-    addCore(batch, view.key, view.signedLength)
-  }
 
   const overflow = []
   const priorityOverflow = []
@@ -613,6 +621,12 @@ function addAllCores(batch, base, maxBatchMin, maxBatchMax) {
     const core = overflow[next]
     addCore(batch, core.key, core.length)
     overflow[next] = overflow[i]
+  }
+}
+
+function addViewCores(batch, base) {
+  for (const view of base.views()) {
+    addCore(batch, view.key, view.signedLength)
   }
 }
 
