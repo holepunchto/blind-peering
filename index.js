@@ -148,7 +148,7 @@ class BlindPeering {
     const all = []
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
-      const peer = this._getBlindPeer(key)
+      const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
       peer.addAutobase(auto, { referrer, priority, announce, additionalViews })
       all.push(peer)
     }
