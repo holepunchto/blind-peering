@@ -420,7 +420,7 @@ class BlindPeer {
     this.channel.addCores(writerBatch)
     this.channel.addCores(viewBatch)
 
-    this.peering.stats.addCoresTx += 2
+    this.peering.stats.addCoresTx += 2 // TODO: track elsewhere
   }
 
   _flush() {
