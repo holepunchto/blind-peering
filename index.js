@@ -410,7 +410,7 @@ class BlindPeer {
       visited
     }
 
-    addViewCores(viewBatch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addViewCores(viewBatch, base)
     addWriterCores(writerBatch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
 
     info.flushed = this.connects
