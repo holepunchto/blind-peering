@@ -394,7 +394,15 @@ class BlindPeer {
   }
 
   _flushAutobase(base, info, visited = new Set()) {
-    const batch = {
+    const viewBatch = {
+      priority: info.priority,
+      referrer: null,
+      announce: info.announce,
+      cores: [],
+      visited
+    }
+
+    const writerBatch = {
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
@@ -402,12 +410,17 @@ class BlindPeer {
       visited
     }
 
-    addAllCores(batch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addViewCores(viewBatch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    addWriterCores(writerBatch, base, this.peering.maxBatchMin, this.peering.maxBatchMax)
+
     info.flushed = this.connects
 
-    if (batch.cores.length === 0) return
+    if (writerBatch.cores.length + viewBatch.cores.length === 0) return
 
-    this.channel.addCores(batch)
+    this.channel.addCores(writerBatch)
+    this.channel.addCores(viewBatch)
+
+    this.peering.stats.addCoresTx++ // TODO: track elsewhere
     this.peering.stats.addCoresTx++ // TODO: track elsewhere
   }
 
@@ -574,12 +587,8 @@ class BlindPeer {
 
 module.exports = BlindPeering
 
-function addAllCores(batch, base, maxBatchMin, maxBatchMax) {
+function addWriterCores(batch, base, maxBatchMin, maxBatchMax) {
   addCore(batch, base.local.key, base.local.length)
-
-  for (const view of base.views()) {
-    addCore(batch, view.key, view.signedLength)
-  }
 
   const overflow = []
   const priorityOverflow = []
@@ -613,6 +622,12 @@ function addAllCores(batch, base, maxBatchMin, maxBatchMax) {
     const core = overflow[next]
     addCore(batch, core.key, core.length)
     overflow[next] = overflow[i]
+  }
+}
+
+function addViewCores(batch, base, maxBatchMin, maxBatchMax) {
+  for (const view of base.views()) {
+    addCore(batch, view.key, view.signedLength)
   }
 }
 
