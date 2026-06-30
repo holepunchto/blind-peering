@@ -624,7 +624,7 @@ function addWriterCores(batch, base, maxBatchMin, maxBatchMax) {
   }
 }
 
-function addViewCores(batch, base, maxBatchMin, maxBatchMax) {
+function addViewCores(batch, base) {
   for (const view of base.views()) {
     addCore(batch, view.key, view.signedLength)
   }
