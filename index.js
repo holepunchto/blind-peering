@@ -253,10 +253,11 @@ class BlindPeering {
       return
     }
     for (const peer of peers) {
-      await peer.connect()
-      if (peer.connected) {
+      try {
         await peer.sendNotification(request)
         return
+      } catch (e) {
+        safetyCatch(e)
       }
     }
     throw new Error('No peers available')
@@ -283,6 +284,7 @@ class BlindPeer {
     this.gc = 0
     this.uploaded = 0
     this.connects = 0
+    this.pendingNotifications = 0
     this.cores = new Map()
     this.bases = new Map()
 
@@ -394,7 +396,7 @@ class BlindPeer {
   }
 
   hasRef() {
-    return this.cores.size + this.bases.size > 0
+    return this.cores.size + this.bases.size > 0 || this.pendingNotifications > 0
   }
 
   _flushCore(core, info) {
@@ -604,8 +606,15 @@ class BlindPeer {
   }
 
   async sendNotification(request) {
-    await this.channel.sendNotification(request)
-    this.peering.stats.notificationsTx++
+    this.pendingNotifications++
+    try {
+      if (!this.connected) await this.connect()
+      if (!this.connected) throw new Error('Could not connect')
+      await this.channel.sendNotification(request)
+      this.peering.stats.notificationsTx++
+    } finally {
+      this.pendingNotifications--
+    }
   }
 
   destroy() {
