@@ -245,10 +245,21 @@ class BlindPeering {
       appId
     }
 
-    const [key] = getClosestMirrorList(target, keys, 1)
-
-    const peer = this._getBlindPeer(key)
-    await peer.sendNotification(request)
+    const keys = getClosestMirrorList(target, keys, this.pick)
+    const peers = keys.map((key) => this._getBlindPeer(key))
+    const connectedPeer = peers.find((peer) => peer.connected)
+    if (connectedPeer) {
+      await connectedPeer.sendNotification(request)
+      return
+    }
+    for (const peer of peers) {
+      await peer.connect()
+      if (peer.connected) {
+        await peer.sendNotification(request)
+        return
+      }
+    }
+    throw new Error('No peers available')
   }
 
   sendNotificationBackground(core, opts) {
