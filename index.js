@@ -619,6 +619,7 @@ class BlindPeer {
               timeout = setTimeout(() => {
                 reject(new Error('Timed out'))
               }, 5_000)
+              timeout.unref()
             })
           ])
         } finally {
