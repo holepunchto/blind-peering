@@ -608,7 +608,23 @@ class BlindPeer {
   async sendNotification(request) {
     this.pendingNotifications++
     try {
-      if (!this.connected) await this.connect()
+      if (!this.connected) {
+        // Don’t wait for the full retry duration. Fail fast so the caller can switch to another blind-peer
+        let timeout = null
+
+        try {
+          await Promise.race([
+            this.connect(),
+            new Promise((resolve, reject) => {
+              timeout = setTimeout(() => {
+                reject(new Error('Timed out'))
+              }, 5_000)
+            })
+          ])
+        } finally {
+          clearTimeout(timeout)
+        }
+      }
       if (!this.connected) throw new Error('Could not connect')
       await this.channel.sendNotification(request)
       this.peering.stats.notificationsTx++
