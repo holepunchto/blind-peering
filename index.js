@@ -33,6 +33,7 @@ class BlindPeering {
     this.suspended = suspended
     this.closed = false
     this.wakeup = wakeup
+    this.blindPeers = new Map()
 
     // TODO: on a next major, get rid of all the work arounds
     // for making it support both hyperdht-encoded addresses
@@ -43,7 +44,6 @@ class BlindPeering {
     this.gcWait = gcWait
     this.pick = pick
     this.relayThrough = relayThrough
-    this.blindPeers = new Map()
     this.maxBatchMin = maxBatchMin
     this.maxBatchMax = maxBatchMax
     this.batchIdleWait = batchIdleWait
@@ -76,7 +76,28 @@ class BlindPeering {
 
   setKeys(keys) {
     this.keyToEncodedKey = getKeysMap(keys)
-    // TODO: rebalance
+
+    // Rebalance
+    // We get all unique existing cores in all blindPeers and re-add them to new blind peers.
+    // The re-added cores copy existing cores info for referral/priority and anncoune flags.
+    // If a key was removed, the removed blind peer continues syncing until client restarts.
+    //// Expected behavior, might be actually better as you get temporal fallback that is still syncing while the new ones just started.
+    // We lose the "pick" option, re-added cores default to 2. But we might have had more or less in original configuration.
+    ///// Possible to solve by counting how many times it appeared before re-adding, for the next step or ignore?
+    // We lose the "target" option if it was used. We will default to just regular distribution.
+    //// There might be ways to infer this info from existing blind peers but seems too complicated for too little benefit
+    const uniqueCores = new Map()
+    for (const bp of this.blindPeers.values()) {
+      for (const [core, info] of bp.cores) {
+        uniqueCores.set(core, info)
+      }
+    }
+
+    for (const [core, info] of uniqueCores) {
+      this.addCoreBackground(core, info)
+    }
+
+    // TODO: do the same thing for autobases
   }
 
   suspend() {
