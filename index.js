@@ -223,7 +223,7 @@ class BlindPeering {
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
       const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
-      peer.addCore(core, { referrer, priority, announce })
+      peer.addCore(core, { target, referrer, priority, announce, pick })
       all.push(peer)
     }
 
@@ -513,7 +513,7 @@ class BlindPeer {
     if (this.peering.wakeup) this.peering.wakeup.addStream(stream)
   }
 
-  addCore(core, { referrer = null, priority = 0, announce = false } = {}) {
+  addCore(core, { target, referrer = null, priority = 0, announce = false, pick } = {}) {
     if (this.cores.has(core)) {
       // Handles an edge case when both sides have a corestore in passive mode,
       // in which case we need to explicitly send a new request to make
@@ -525,7 +525,7 @@ class BlindPeer {
     }
     this.peering.stats.addCore++
 
-    const info = { priority, announce, referrer, flushed: 0 }
+    const info = { priority, announce, referrer, target, pick, flushed: 0 }
     this.cores.set(core, info)
 
     core.on('close', () => {
