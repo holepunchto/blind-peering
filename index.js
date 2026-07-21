@@ -33,6 +33,7 @@ class BlindPeering {
     this.suspended = suspended
     this.closed = false
     this.wakeup = wakeup
+    this.blindPeers = new Map()
 
     // TODO: on a next major, get rid of all the work arounds
     // for making it support both hyperdht-encoded addresses
@@ -43,7 +44,6 @@ class BlindPeering {
     this.gcWait = gcWait
     this.pick = pick
     this.relayThrough = relayThrough
-    this.blindPeers = new Map()
     this.maxBatchMin = maxBatchMin
     this.maxBatchMax = maxBatchMax
     this.batchIdleWait = batchIdleWait
@@ -76,7 +76,24 @@ class BlindPeering {
 
   setKeys(keys) {
     this.keyToEncodedKey = getKeysMap(keys)
-    // TODO: rebalance
+
+    const uniqueCores = new Map()
+    const uniqueBases = new Map()
+    for (const bp of this.blindPeers.values()) {
+      for (const [core, info] of bp.cores) {
+        uniqueCores.set(core, info)
+      }
+      for (const [base, info] of bp.bases) {
+        uniqueBases.set(base, info)
+      }
+    }
+
+    for (const [core, info] of uniqueCores) {
+      this.addCoreBackground(core, info)
+    }
+    for (const [base, info] of uniqueBases) {
+      this.addAutobaseBackground(base, info)
+    }
   }
 
   suspend() {
@@ -149,7 +166,7 @@ class BlindPeering {
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
       const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
-      peer.addAutobase(auto, { referrer, priority, announce, additionalViews })
+      peer.addAutobase(auto, { target, referrer, priority, announce, additionalViews, pick })
       all.push(peer)
     }
 
@@ -206,7 +223,7 @@ class BlindPeering {
 
     for (const key of getClosestMirrorList(target, keys, pick)) {
       const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
-      peer.addCore(core, { referrer, priority, announce })
+      peer.addCore(core, { target, referrer, priority, announce, pick })
       all.push(peer)
     }
 
@@ -496,7 +513,7 @@ class BlindPeer {
     if (this.peering.wakeup) this.peering.wakeup.addStream(stream)
   }
 
-  addCore(core, { referrer = null, priority = 0, announce = false } = {}) {
+  addCore(core, { target, referrer = null, priority = 0, announce = false, pick } = {}) {
     if (this.cores.has(core)) {
       // Handles an edge case when both sides have a corestore in passive mode,
       // in which case we need to explicitly send a new request to make
@@ -508,7 +525,7 @@ class BlindPeer {
     }
     this.peering.stats.addCore++
 
-    const info = { priority, announce, referrer, flushed: 0 }
+    const info = { priority, announce, referrer, target, pick, flushed: 0 }
     this.cores.set(core, info)
 
     core.on('close', () => {
@@ -524,7 +541,7 @@ class BlindPeer {
 
   addAutobase(
     auto,
-    { referrer = null, priority = 1, announce = false, additionalViews = [] } = {}
+    { target, referrer = null, priority = 1, announce = false, additionalViews = [], pick } = {}
   ) {
     if (this.bases.has(auto)) return
     this.peering.stats.addAutobase++
@@ -534,6 +551,8 @@ class BlindPeer {
       announce,
       referrer,
       additionalViews,
+      target,
+      pick,
       flushed: 0,
       flushedWriterBatch: false,
       flushTimeout: null,
