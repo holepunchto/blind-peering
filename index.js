@@ -19,6 +19,7 @@ class BlindPeering {
       suspended = false,
       wakeup = null,
       keys = [],
+      blindPeers = [],
       gcWait = 2000,
       pick = 2,
       relayThrough = null,
@@ -38,8 +39,11 @@ class BlindPeering {
     // TODO: on a next major, get rid of all the work arounds
     // for making it support both hyperdht-encoded addresses
     // and straight keys (by always using hyperdht-encoded ones)
-    this.keyToEncodedKey = null // set next line
-    this.setKeys(keys)
+    this.blindPeerInfos = null // set below
+    this.keyToEncodedKey = null // set below
+
+    if (blindPeers?.length) this.setBlindPeers(blindPeers)
+    else this.setKeys(keys)
 
     this.gcWait = gcWait
     this.pick = pick
@@ -75,7 +79,18 @@ class BlindPeering {
   }
 
   setKeys(keys) {
-    this.keyToEncodedKey = getKeysMap(keys)
+    this.setBlindPeers(keys.map((key) => ({ key })))
+  }
+
+  setBlindPeers(blindPeers) {
+    this.blindPeerInfos = []
+    this.keyToEncodedKey = new Map()
+
+    for (const blindPeer of blindPeers) {
+      const { key, encodedKey } = decodeKey(blindPeer.key)
+      this.blindPeerInfos.push({ key, group: blindPeer.group })
+      this.keyToEncodedKey.set(key, encodedKey)
+    }
 
     const uniqueCores = new Map()
     const uniqueBases = new Map()
@@ -153,7 +168,8 @@ class BlindPeering {
       announce,
       additionalViews,
       pick = this.pick,
-      keys = this.keys
+      keys = null,
+      blindPeers = null
     } = {}
   ) {
     await auto.ready()
@@ -163,9 +179,10 @@ class BlindPeering {
     if (!referrer) referrer = target
 
     const all = []
+    const mirrors = this._getMirrors(blindPeers, keys)
 
-    for (const key of getClosestMirrorList(target, keys, pick)) {
-      const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
+    for (const mirror of getClosestMirrorList(target, mirrors, pick)) {
+      const peer = this._getBlindPeer(this.keyToEncodedKey.get(mirror.key) || mirror.key)
       peer.addAutobase(auto, { target, referrer, priority, announce, additionalViews, pick })
       all.push(peer)
     }
@@ -197,6 +214,12 @@ class BlindPeering {
     if (this._gc.size === 0) this._stopGC()
   }
 
+  _getMirrors(blindPeers, keys) {
+    if (blindPeers) return blindPeers
+    if (keys) return keys.map((key) => ({ key }))
+    return this.blindPeerInfos
+  }
+
   _getBlindPeer(key) {
     const id = b4a.toString(key, 'hex')
     let peer = this.blindPeers.get(id)
@@ -212,7 +235,7 @@ class BlindPeering {
 
   async addCore(
     core,
-    { target, referrer, priority, announce, pick = this.pick, keys = this.keys } = {}
+    { target, referrer, priority, announce, pick = this.pick, keys = null, blindPeers = null } = {}
   ) {
     await core.ready()
     if (core.closing) return
@@ -220,9 +243,10 @@ class BlindPeering {
     if (!target) target = core.key
 
     const all = []
+    const mirrors = this._getMirrors(blindPeers, keys)
 
-    for (const key of getClosestMirrorList(target, keys, pick)) {
-      const peer = this._getBlindPeer(this.keyToEncodedKey.get(key) || key)
+    for (const mirror of getClosestMirrorList(target, mirrors, pick)) {
+      const peer = this._getBlindPeer(this.keyToEncodedKey.get(mirror.key) || mirror.key)
       peer.addCore(core, { target, referrer, priority, announce, pick })
       all.push(peer)
     }
@@ -241,7 +265,8 @@ class BlindPeering {
       roomDiscoveryKey = hcCrypto.discoveryKey(roomKey),
       index = null,
       target = core.key,
-      keys = this.keys,
+      keys = null,
+      blindPeers = null,
       extra = null,
       appId = null
     } = {}
@@ -262,8 +287,9 @@ class BlindPeering {
       appId
     }
 
-    const closestKeys = getClosestMirrorList(target, keys, this.pick)
-    const peers = closestKeys.map((key) => this._getBlindPeer(key))
+    const mirrors = this._getMirrors(blindPeers, keys)
+    const closestMirrors = getClosestMirrorList(target, mirrors, this.pick)
+    const peers = closestMirrors.map((mirror) => this._getBlindPeer(mirror.key))
     const connectedPeer = peers.find((peer) => peer.connected)
     if (connectedPeer) {
       await connectedPeer.sendNotification(request)
@@ -744,7 +770,7 @@ function getClosestMirrorList(key, list, n) {
   for (let i = 0; i < n; i++) {
     let current = null
     for (let j = i; j < list.length; j++) {
-      const next = xorDistance(list[j], key)
+      const next = xorDistance(list[j].key, key)
       if (current && xorDistance.gt(next, current)) continue
       const tmp = list[i]
       list[i] = list[j]
@@ -756,15 +782,10 @@ function getClosestMirrorList(key, list, n) {
   return list.slice(0, n)
 }
 
-function decodeKey(keyToEncodedKey, encodedKey) {
+function decodeKey(encodedKey) {
   // Ensure its a buffer
   encodedKey = b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey)
 
   const { key } = HyperDHTAddress.decode(encodedKey)
-  keyToEncodedKey.set(key, encodedKey)
-  return keyToEncodedKey
-}
-
-function getKeysMap(encodedKeys) {
-  return encodedKeys.reduce(decodeKey, new Map())
+  return { key, encodedKey }
 }
