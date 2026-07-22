@@ -6,18 +6,16 @@ on:
   pull_request:
     branches:
       - main
-
+permissions:
+  contents: read
 jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest]
+  security:
+    runs-on: ubuntu-latest
+    name: Security
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1 https://github.com/actions/checkout/releases/tag/v4.1.1
-      - name: install node
-        uses: actions/setup-node@1a4442cacd436585916779262731d5b162bc6ec7 # v3.8.2 https://github.com/actions/setup-node/releases/tag/v3.8.2
-        with:
-          node-version: 20
-      - run: npm install
+      - uses: holepunchto/actions/security-base@v1
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: holepunchto/actions/node-base@v1
       - run: npm test
