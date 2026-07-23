@@ -43,7 +43,6 @@ class BlindPeering {
     // for making it support both hyperdht-encoded addresses
     // and straight keys (by always using hyperdht-encoded ones)
     this.blindPeerInfos = null // set below
-    this.keyToEncodedKey = null // set below
 
     if (blindPeers?.length) this.setBlindPeers(blindPeers)
     else this.setKeys(keys)
@@ -79,7 +78,7 @@ class BlindPeering {
   }
 
   get keys() {
-    return Array.from(this.keyToEncodedKey.keys())
+    return Array.from(this.blindPeerInfos.map(({ key }) => key))
   }
 
   setKeys(keys) {
@@ -87,14 +86,7 @@ class BlindPeering {
   }
 
   setBlindPeers(blindPeers) {
-    this.blindPeerInfos = []
-    this.keyToEncodedKey = new Map()
-
-    for (const blindPeer of blindPeers) {
-      const { key, encodedKey } = decodeKey(blindPeer.key)
-      this.blindPeerInfos.push({ key, group: blindPeer.group })
-      this.keyToEncodedKey.set(key, encodedKey)
-    }
+    this.blindPeerInfos = toBlindPeerInfos(blindPeers)
 
     const uniqueCores = new Map()
     const uniqueBases = new Map()
@@ -187,7 +179,7 @@ class BlindPeering {
     const all = []
 
     for (const mirror of getClosestMirrorList(target, mirrors, pick)) {
-      const peer = this._getBlindPeer(this.keyToEncodedKey.get(mirror.key) || mirror.key)
+      const peer = this._getBlindPeer(mirror.encodedKey)
       peer.addAutobase(auto, { target, referrer, priority, announce, additionalViews, pick })
       all.push(peer)
     }
@@ -220,16 +212,16 @@ class BlindPeering {
   }
 
   _getMirrors(blindPeers, keys) {
-    if (blindPeers) return blindPeers
-    if (keys) return keys.map((key) => ({ key }))
+    if (blindPeers) return toBlindPeerInfos(blindPeers)
+    if (keys) return toBlindPeerInfos(keys.map((key) => ({ key })))
     return this.blindPeerInfos
   }
 
-  _getBlindPeer(key) {
-    const id = b4a.toString(key, 'hex')
+  _getBlindPeer(encodedKey) {
+    const id = b4a.toString(encodedKey, 'hex')
     let peer = this.blindPeers.get(id)
     if (peer) return peer
-    peer = new BlindPeer(this, key, { backoffResetWait: this.backoffResetWait })
+    peer = new BlindPeer(this, encodedKey, { backoffResetWait: this.backoffResetWait })
     this.blindPeers.set(id, peer)
     return peer
   }
@@ -252,7 +244,7 @@ class BlindPeering {
     const all = []
 
     for (const mirror of getClosestMirrorList(target, mirrors, pick)) {
-      const peer = this._getBlindPeer(this.keyToEncodedKey.get(mirror.key) || mirror.key)
+      const peer = this._getBlindPeer(mirror.encodedKey)
       peer.addCore(core, { target, referrer, priority, announce, pick })
       all.push(peer)
     }
@@ -296,7 +288,7 @@ class BlindPeering {
     }
 
     const closestMirrors = getClosestMirrorList(target, mirrors, this.pick)
-    const peers = closestMirrors.map((mirror) => this._getBlindPeer(this.keyToEncodedKey.get(mirror.key) || mirror.key))
+    const peers = closestMirrors.map((mirror) => this._getBlindPeer(mirror.encodedKey))
     const connectedPeer = peers.find((peer) => peer.connected)
     if (connectedPeer) {
       await connectedPeer.sendNotification(request)
@@ -793,4 +785,11 @@ function decodeKey(encodedKey) {
 
   const { key } = HyperDHTAddress.decode(encodedKey)
   return { key, encodedKey }
+}
+
+function toBlindPeerInfos(blindPeers) {
+  return blindPeers.map((blindPeer) => {
+    const { key, encodedKey } = decodeKey(blindPeer.key)
+    return { key, encodedKey, group: blindPeer.group }
+  })
 }
