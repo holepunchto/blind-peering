@@ -263,7 +263,8 @@ class BlindPeering {
     }
 
     const closestKeys = getClosestMirrorList(target, keys, this.pick)
-    const peers = closestKeys.map((key) => this._getBlindPeer(key))
+
+    const peers = closestKeys.map((key) => this._getBlindPeer(this.keyToEncodedKey.get(key) || key))
     const connectedPeer = peers.find((peer) => peer.connected)
     if (connectedPeer) {
       await connectedPeer.sendNotification(request)
