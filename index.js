@@ -759,9 +759,12 @@ function getClosestMirrorList(key, list, n) {
 
   if (n > list.length) n = list.length
 
+  const usedGroups = new Set()
+
   for (let i = 0; i < n; i++) {
     let current = null
     for (let j = i; j < list.length; j++) {
+      if (usedGroups.has(list[j].group)) continue
       const next = xorDistance(list[j].key, key)
       if (current && xorDistance.gt(next, current)) continue
       const tmp = list[i]
@@ -769,6 +772,13 @@ function getClosestMirrorList(key, list, n) {
       list[j] = tmp
       current = next
     }
+    if (current === null) {
+      // Every remaining peer is from a used group, clear so we keep balancing across groups
+      usedGroups.clear()
+      i--
+      continue
+    }
+    if (list[i].group) usedGroups.add(list[i].group)
   }
 
   return list.slice(0, n)
