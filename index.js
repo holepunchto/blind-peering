@@ -449,13 +449,7 @@ class BlindPeer {
       visited
     }
 
-    addViewCores(
-      viewBatch,
-      auto,
-      this.peering.maxBatchMin,
-      this.peering.maxBatchMax,
-      info.additionalViews
-    )
+    addViewCores(viewBatch, auto, this.peering.maxBatchMax, info.additionalViews)
 
     addWriterCores(writerBatch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
 
