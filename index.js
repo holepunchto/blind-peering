@@ -7,7 +7,9 @@ const HyperDHTAddress = require('hyperdht-address')
 const safetyCatch = require('safety-catch')
 const Backoff = require('./lib/backoff.js')
 
-const DEFAULT_BACKOFF = [1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000]
+const DEFAULT_BACKOFF = [
+  0, 1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000
+]
 const MAX_BATCH_MIN = 3
 const MAX_BATCH_MAX = 9
 const BATCH_IDLE_WAIT = 2000
@@ -25,7 +27,8 @@ class BlindPeering {
       maxBatchMin = MAX_BATCH_MIN,
       maxBatchMax = MAX_BATCH_MAX,
       batchIdleWait = BATCH_IDLE_WAIT,
-      batchMaxWait = BATCH_MAX_WAIT
+      batchMaxWait = BATCH_MAX_WAIT,
+      backoffResetWait = 10000
     } = opts
 
     this.dht = dht
@@ -48,6 +51,7 @@ class BlindPeering {
     this.maxBatchMax = maxBatchMax
     this.batchIdleWait = batchIdleWait
     this.batchMaxWait = batchMaxWait
+    this.backoffResetWait = backoffResetWait
 
     this.stats = {
       addAutobase: 0,
@@ -201,7 +205,7 @@ class BlindPeering {
     const id = b4a.toString(key, 'hex')
     let peer = this.blindPeers.get(id)
     if (peer) return peer
-    peer = new BlindPeer(this, key)
+    peer = new BlindPeer(this, key, { backoffResetWait: this.backoffResetWait })
     this.blindPeers.set(id, peer)
     return peer
   }
@@ -296,7 +300,7 @@ class BlindPeering {
 }
 
 class BlindPeer {
-  constructor(peering, remotePublicKey) {
+  constructor(peering, remotePublicKey, { backoffResetWait }) {
     this.peering = peering
     this.remotePublicKey = remotePublicKey
     this.gc = 0
@@ -314,6 +318,7 @@ class BlindPeer {
     this.destroyed = false
     this.needsFlush = false
     this.backoff = new Backoff(DEFAULT_BACKOFF)
+    this.backoffResetWait = backoffResetWait
 
     this._pendingFlushes = new Map()
   }
@@ -366,15 +371,12 @@ class BlindPeer {
   }
 
   async _connect() {
-    this.backoff.reset()
     this.connects++
     this.needsFlush = true
 
     for (let runs = 0; this._active(); runs++) {
-      if (runs > 0) {
-        await this.backoff.run()
-        if (!this._active()) break
-      }
+      await this.backoff.run()
+      if (!this._active()) break
 
       const socket = this.peering.dht.connect(this.remotePublicKey, {
         keyPair: this.peering.keyPair,
@@ -410,6 +412,12 @@ class BlindPeer {
       return
     }
 
+    const connectAttempt = this.connects
+    setTimeout(() => {
+      if (this.closing) return
+      const stayedConnected = connectAttempt === this.connects
+      if (stayedConnected) this.backoff.reset() // Otherwise the connection probably errored, so avoid reconnect loop
+    }, this.backoffResetWait).unref()
     this.update()
   }
 
