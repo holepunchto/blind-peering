@@ -710,7 +710,7 @@ function addViewCores(batch, auto, maxBatchMax, additionalViews) {
     addCore(batch, view.key, view.signedLength)
   }
 
-  for (let i = 0; i < additionalViews.length && batch.length < maxBatchMax; i++) {
+  for (let i = 0; i < additionalViews.length && batch.cores.length < maxBatchMax; i++) {
     const view = additionalViews[i]
     addCore(batch, view.key, view.signedLength)
   }
