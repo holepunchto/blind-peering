@@ -16,9 +16,13 @@ Create a new Blind Peering instance. `dht` is a HyperDHT instance and `store` is
 
 `opts` include:
 
-- `keys`: a list of blind peer keys (mirrors) to use. You should always set this, otherwise there are no mirrors to contact.
+- `blindPeers`: a list of `{ key, group }` blind peers (mirrors) to use. You should always set this, otherwise there are no mirrors to contact. `group` is optional and indicates where the blind peer is hosted, so that mirrors for the same core are picked from different groups where possible.
 - `suspended`: whether to start in suspended state (default `false`)
 - `wakeup`: a Wakeup object
+
+#### `blindPeering.setBlindPeers(blindPeers)`
+
+Replace the list of blind peers, in the same `{ key, group }` form the constructor takes, and re-add the currently mirrored cores and autobases to the new set.
 
 #### `await blindPeering.addCore(core, { target = core.key, ...opts })`
 
@@ -32,6 +36,7 @@ Add a Hypercore to a blind peer.
 - `mirrors`: how many blind peers to contact. Defaults to 1.
 - `referrer`: key of a referrer hypercore to pass to the blind peer
 - `priority`: integer indicating the priority to request. See Blind Peer for the possibilities
+- `blindPeers`: use these `{ key, group }` blind peers instead of the configured ones, for a core that should live on its own set of mirrors
 
 #### `blindPeering.addCoreBackground(core, { target = core.key, ...opts })`
 
