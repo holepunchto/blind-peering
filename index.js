@@ -538,6 +538,9 @@ class BlindPeer {
 
   addCore(core, { target, referrer = null, priority = 0, announce = false, pick } = {}) {
     let info = this.cores.get(core)
+    // We never override existing info if it already exists
+    // so the first addCore choses all properties
+
     if (info) {
       // Handles an edge case when both sides have a corestore in passive mode,
       // in which case we need to explicitly send a new request to make
