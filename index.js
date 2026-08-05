@@ -315,6 +315,7 @@ class BlindPeering {
     this.dht.off('network-change', this._bumpBound)
     for (const peer of this.blindPeers.values()) peer.destroy()
     this.blindPeers.clear()
+    this.closed = true
     return Promise.resolve() // atm nothing async but keep signature
   }
 }
