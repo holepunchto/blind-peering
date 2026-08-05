@@ -434,7 +434,7 @@ class BlindPeer {
 
     const connectAttempt = this.connects
     setTimeout(() => {
-      if (this.closing) return
+      if (this.destroyed) return
       const stayedConnected = connectAttempt === this.connects
       if (stayedConnected) this.backoff.reset() // Otherwise the connection probably errored, so avoid reconnect loop
     }, this.backoffResetWait).unref()
