@@ -537,25 +537,27 @@ class BlindPeer {
   }
 
   addCore(core, { target, referrer = null, priority = 0, announce = false, pick } = {}) {
-    if (this.cores.has(core)) {
+    let info = this.cores.get(core)
+    if (info) {
       // Handles an edge case when both sides have a corestore in passive mode,
       // in which case we need to explicitly send a new request to make
       // the blind-peer activate replication with us
       const isReplicating = core.peers.some((peer) =>
         b4a.equals(peer.remotePublicKey, this.remotePublicKey)
       )
-      if (isReplicating) return
+      if (isReplicating) return // Normal case
+    } else {
+      info = { priority, announce, referrer, target, pick, flushed: 0 }
+      this.cores.set(core, info)
+
+      core.on('close', () => {
+        if (this.cores.get(core) !== info) return
+        this.cores.delete(core)
+        this.update()
+      })
     }
+
     this.peering.stats.addCore++
-
-    const info = { priority, announce, referrer, target, pick, flushed: 0 }
-    this.cores.set(core, info)
-
-    core.on('close', () => {
-      if (this.cores.get(core) !== info) return
-      this.cores.delete(core)
-      this.update()
-    })
 
     if (this.connected) this._flushCore(core, info)
 
