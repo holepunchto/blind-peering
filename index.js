@@ -566,7 +566,7 @@ class BlindPeer {
       }
 
       this.cores.set(core, info)
-      
+
       const onclose = () => {
         info.destroy()
       }
