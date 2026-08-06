@@ -538,38 +538,42 @@ class BlindPeer {
   }
 
   addCore(core, { target, referrer = null, priority = 0, announce = false, pick } = {}) {
-    const previousInfo = this.cores.get(core)
-    if (previousInfo) {
+    let info = this.cores.get(core)
+    // We never override existing info if it already exists
+    // so the first addCore chooses all properties
+
+    if (info) {
       // Handles an edge case when both sides have a corestore in passive mode,
       // in which case we need to explicitly send a new request to make
       // the blind-peer activate replication with us
       const isReplicating = core.peers.some((peer) =>
         b4a.equals(peer.remotePublicKey, this.remotePublicKey)
       )
-      if (isReplicating) return
-    }
-    this.peering.stats.addCore++
-
-    const info = {
-      priority,
-      announce,
-      referrer,
-      target,
-      pick,
-      flushed: 0,
-      destroy: () => {
-        this.cores.delete(core)
-        this.update()
-        core.off('close', info.onclose)
+      if (isReplicating) return // Normal case
+    } else {
+      info = {
+        priority,
+        announce,
+        referrer,
+        target,
+        pick,
+        flushed: 0,
+        destroy: () => {
+          this.cores.delete(core)
+          this.update()
+          core.off('close', onclose)
+        }
       }
-    }
-    info.onclose = () => {
-      info.destroy()
+
+      this.cores.set(core, info)
+      
+      const onclose = () => {
+        info.destroy()
+      }
+      core.on('close', onclose)
     }
 
-    this.cores.set(core, info)
-    if (previousInfo?.onclose) core.off('close', previousInfo.onclose)
-    core.on('close', info.onclose)
+    this.peering.stats.addCore++
 
     if (this.connected) this._flushCore(core, info)
 
