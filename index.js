@@ -315,6 +315,7 @@ class BlindPeering {
     this.dht.off('network-change', this._bumpBound)
     for (const peer of this.blindPeers.values()) peer.destroy()
     this.blindPeers.clear()
+    this.closed = true
     return Promise.resolve() // atm nothing async but keep signature
   }
 }
@@ -434,7 +435,7 @@ class BlindPeer {
 
     const connectAttempt = this.connects
     setTimeout(() => {
-      if (this.closing) return
+      if (this.destroyed) return
       const stayedConnected = connectAttempt === this.connects
       if (stayedConnected) this.backoff.reset() // Otherwise the connection probably errored, so avoid reconnect loop
     }, this.backoffResetWait).unref()
