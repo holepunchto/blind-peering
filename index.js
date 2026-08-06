@@ -540,7 +540,7 @@ class BlindPeer {
   addCore(core, { target, referrer = null, priority = 0, announce = false, pick } = {}) {
     let info = this.cores.get(core)
     // We never override existing info if it already exists
-    // so the first addCore choses all properties
+    // so the first addCore chooses all properties
 
     if (info) {
       // Handles an edge case when both sides have a corestore in passive mode,
@@ -551,14 +551,26 @@ class BlindPeer {
       )
       if (isReplicating) return // Normal case
     } else {
-      info = { priority, announce, referrer, target, pick, flushed: 0 }
+      info = {
+        priority,
+        announce,
+        referrer,
+        target,
+        pick,
+        flushed: 0,
+        destroy: () => {
+          this.cores.delete(core)
+          this.update()
+          core.off('close', onclose)
+        }
+      }
+
       this.cores.set(core, info)
 
-      core.on('close', () => {
-        if (this.cores.get(core) !== info) return
-        this.cores.delete(core)
-        this.update()
-      })
+      const onclose = () => {
+        info.destroy()
+      }
+      core.on('close', onclose)
     }
 
     this.peering.stats.addCore++
@@ -593,6 +605,14 @@ class BlindPeer {
         auto.off('writer', onwriter)
       }
     }
+    info.destroy = () => {
+      info.cleanup() // We can't reasonable flush anymore: no guarantees on core lengths etc of closed cores
+      this.bases.delete(auto)
+      this.update()
+      auto.off('close', onclose)
+      auto.core?.off('migrate', onmigrate)
+    }
+
     this.bases.set(auto, info)
 
     const visited = new Set() // to avoid duplicates when sending the writer batch
@@ -601,6 +621,24 @@ class BlindPeer {
       if (info.flushedWriterBatch) return // race condition
       clearTimeout(info.flushTimeout)
       info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
+    }
+
+    const onclose = () => {
+      info.destroy()
+    }
+
+    const onmigrate = () => {
+      // TODO: cleanly
+      // Context: the views have not yet rotated after 'migrate' triggers. For that, we need to wait for the 'reboot' event.
+      // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
+      // This hack makes it so that in practice we only flush after the reboot
+      setTimeout(() => {
+        if (this.peering.closed) return
+        if (this.connected) {
+          return this._flushAutobase(auto, info)
+        }
+        return this.update()
+      }, 500).unref()
     }
 
     const flushWriterBatch = () => {
@@ -615,27 +653,11 @@ class BlindPeer {
       }
     }
 
-    auto.on('close', () => {
-      info.cleanup() // We can't reasonable flush anymore: no guarantees on core lengths etc of closed cores
-      this.bases.delete(auto)
-      this.update()
-    })
+    auto.on('close', onclose)
 
     // autobase only
     if (auto.core) {
-      auto.core.on('migrate', () => {
-        // TODO: cleanly
-        // Context: the views have not yet rotated after 'migrate' triggers. For that, we need to wait for the 'reboot' event.
-        // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
-        // This hack makes it so that in practice we only flush after the reboot
-        setTimeout(() => {
-          if (this.peering.closed) return
-          if (this.connected) {
-            return this._flushAutobase(auto, info)
-          }
-          return this.update()
-        }, 500).unref()
-      })
+      auto.core.on('migrate', onmigrate)
     }
 
     if (this.connected) {
@@ -684,7 +706,8 @@ class BlindPeer {
 
   destroy() {
     this.destroyed = true
-    for (const info of this._pendingFlushes.values()) info.cleanup()
+    for (const info of this.cores.values()) info.destroy()
+    for (const info of this.bases.values()) info.destroy()
     this.backoff.destroy()
     if (this.channel) this.channel.close()
     if (this.socket) this.socket.destroy()
