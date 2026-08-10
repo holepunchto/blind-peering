@@ -33,7 +33,7 @@ Add a Hypercore to a blind peer.
 `opts` include:
 
 - `announce`: whether the hypercore should be announced to the swarm (default false)
-- `mirrors`: how many blind peers to contact. Defaults to 1.
+- `pick`: how many blind peers to contact. Defaults to 2.
 - `referrer`: key of a referrer hypercore to pass to the blind peer
 - `priority`: integer indicating the priority to request. See Blind Peer for the possibilities
 - `blindPeers`: use these `{ key, group }` blind peers instead of the configured ones, for a core that should live on its own set of mirrors
