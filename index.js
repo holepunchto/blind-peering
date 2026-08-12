@@ -259,10 +259,10 @@ class BlindPeering {
   async sendNotification(
     core,
     {
-      roomKey = core.key,
-      roomDiscoveryKey = hcCrypto.discoveryKey(roomKey),
+      roomKey = null,
+      roomDiscoveryKey = null,
       index = null,
-      target = core.key,
+      target = null,
       keys = null,
       blindPeers = null,
       extra = null,
@@ -272,7 +272,12 @@ class BlindPeering {
     const mirrors = this._getMirrors(blindPeers, keys)
 
     await core.ready()
-    if (index === null) index = core.length - 1
+    if (core.closing) return
+
+    roomKey ??= core.key
+    roomDiscoveryKey ??= hcCrypto.discoveryKey(roomKey)
+    target ??= core.key
+    index ??= core.length - 1
 
     const request = {
       block: {
