@@ -707,6 +707,7 @@ class BlindPeer {
       this.peering.stats.notificationsTx++
     } finally {
       this.pendingNotifications--
+      this.update()
     }
   }
 
