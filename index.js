@@ -682,6 +682,7 @@ class BlindPeer {
 
   async sendNotification(request) {
     this.pendingNotifications++
+    this.update()
     try {
       if (!this.connected) {
         // Don’t wait for the full retry duration. Fail fast so the caller can switch to another blind-peer
