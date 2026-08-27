@@ -548,13 +548,17 @@ class BlindPeer {
     // so the first addCore chooses all properties
 
     if (info) {
+      if (this.peering.store.active) return // Normal case
+
       // Handles an edge case when both sides have a corestore in passive mode,
       // in which case we need to explicitly send a new request to make
       // the blind-peer activate replication with us
+      // Warning: this has a known limitation where repeated requests while already connected to the blind peer
+      // but while the replication on the core is not (yet) established never get deduped
       const isReplicating = core.peers.some((peer) =>
         b4a.equals(peer.remotePublicKey, this.remotePublicKey)
       )
-      if (isReplicating) return // Normal case
+      if (isReplicating) return // Normal case for passive corestore
     } else {
       info = {
         priority,
