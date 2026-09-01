@@ -552,7 +552,7 @@ class BlindPeer {
       // or core is in passive mode, and the core length changed,
       // in which case we need to explicitly send a new request to make
       // the blind-peer activate replication with us
-      if (core.length === info.length) return
+      if (core.length === info.lastAddedLength) return
       const isReplicating = core.peers.some((peer) =>
         b4a.equals(peer.remotePublicKey, this.remotePublicKey)
       )
@@ -565,6 +565,7 @@ class BlindPeer {
         target,
         pick,
         flushed: 0,
+        lastAddedLength: core.length,
         destroy: () => {
           this.cores.delete(core)
           this.update()
@@ -581,7 +582,7 @@ class BlindPeer {
     }
 
     this.peering.stats.addCore++
-    info.length = core.length
+    info.lastAddedLength = core.length
     if (this.connected) this._flushCore(core, info)
 
     this.update()
