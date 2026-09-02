@@ -6,6 +6,7 @@ const ID = require('hypercore-id-encoding')
 const HyperDHTAddress = require('hyperdht-address')
 const safetyCatch = require('safety-catch')
 const Backoff = require('./lib/backoff.js')
+const { version } = require('./package.json')
 
 const DEFAULT_BACKOFF = [
   0, 1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000
@@ -410,6 +411,7 @@ class BlindPeer {
       })
 
       const channel = new BlindPeerMuxer(socket, {
+        handshake: { blindPeeringVersion: version },
         onclose: (remote) => {
           const connected = this.connected
           socket.destroy()
