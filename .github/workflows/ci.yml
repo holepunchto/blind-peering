@@ -18,6 +18,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: holepunchto/actions/node-base@v1
-        with:
-          allow-git: root
       - run: npm test
