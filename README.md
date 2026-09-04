@@ -19,6 +19,7 @@ Create a new Blind Peering instance. `dht` is a HyperDHT instance and `store` is
 - `blindPeers`: a list of `{ key, group }` blind peers (mirrors) to use. You should always set this, otherwise there are no mirrors to contact. `group` is optional and indicates where the blind peer is hosted, so that mirrors for the same core are picked from different groups where possible.
 - `suspended`: whether to start in suspended state (default `false`)
 - `wakeup`: a Wakeup object
+- `notificationRateLimit`: `{ capacity: 10, interval: 200, timeout: 10000 }` rate limit for `sendNotification`. Pass `null` to disable.
 
 #### `blindPeering.setBlindPeers(blindPeers)`
 

@@ -5,6 +5,7 @@ const hcCrypto = require('hypercore-crypto')
 const ID = require('hypercore-id-encoding')
 const HyperDHTAddress = require('hyperdht-address')
 const safetyCatch = require('safety-catch')
+const BucketRateLimiter = require('bucket-rate-limit')
 const Backoff = require('./lib/backoff.js')
 const { version } = require('./package.json')
 
@@ -15,6 +16,9 @@ const MAX_BATCH_MIN = 3
 const MAX_BATCH_MAX = 9
 const BATCH_IDLE_WAIT = 2000
 const BATCH_MAX_WAIT = 10_000
+const NOTIFICATION_CAPACITY = 10
+const NOTIFICATION_INTERVAL = 200
+const NOTIFICATION_TIMEOUT = 10_000
 
 class BlindPeering {
   constructor(dht, store, opts = {}) {
@@ -30,7 +34,12 @@ class BlindPeering {
       maxBatchMax = MAX_BATCH_MAX,
       batchIdleWait = BATCH_IDLE_WAIT,
       batchMaxWait = BATCH_MAX_WAIT,
-      backoffResetWait = 10000
+      backoffResetWait = 10000,
+      notificationRateLimit = {
+        capacity: NOTIFICATION_CAPACITY,
+        interval: NOTIFICATION_INTERVAL,
+        timeout: NOTIFICATION_TIMEOUT
+      }
     } = opts
 
     this.dht = dht
@@ -56,6 +65,15 @@ class BlindPeering {
     this.batchIdleWait = batchIdleWait
     this.batchMaxWait = batchMaxWait
     this.backoffResetWait = backoffResetWait
+    this.notificationRate = {
+      limiter: notificationRateLimit
+        ? new BucketRateLimiter(
+            notificationRateLimit.capacity || NOTIFICATION_CAPACITY,
+            notificationRateLimit.interval || NOTIFICATION_INTERVAL
+          )
+        : null,
+      timeout: notificationRateLimit?.timeout || NOTIFICATION_TIMEOUT
+    }
 
     this.stats = {
       addAutobase: 0,
@@ -270,6 +288,8 @@ class BlindPeering {
       appId = null
     } = {}
   ) {
+    await this._waitNotificationRateLimit()
+
     const mirrors = this._getMirrors(blindPeers, keys)
 
     await core.ready()
@@ -315,10 +335,28 @@ class BlindPeering {
     this.sendNotification(core, opts).catch(safetyCatch)
   }
 
+  async _waitNotificationRateLimit() {
+    if (!this.notificationRate.limiter) return
+
+    let timer
+    const totalTimeoutAbort = new Promise((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error('Timed out'))
+      }, this.notificationRate.timeout)
+      timer.unref()
+    })
+    totalTimeoutAbort.catch(safetyCatch)
+
+    await this.notificationRate.limiter.wait({ abort: totalTimeoutAbort })
+    clearTimeout(timer)
+  }
+
   close() {
     this._stopGC()
     this._gc = new Set()
     this.dht.off('network-change', this._bumpBound)
+    this.notificationRate.limiter?.destroy()
+    this.notificationRate.limiter = null
     for (const peer of this.blindPeers.values()) peer.destroy()
     this.blindPeers.clear()
     this.closed = true
