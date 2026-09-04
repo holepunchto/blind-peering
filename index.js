@@ -66,13 +66,12 @@ class BlindPeering {
     this.batchMaxWait = batchMaxWait
     this.backoffResetWait = backoffResetWait
     this.notificationRate = {
-      limiter:
-        notificationRateLimit
-          ? new BucketRateLimiter(
-              notificationRateLimit.capacity || NOTIFICATION_CAPACITY,
-              notificationRateLimit.interval || NOTIFICATION_INTERVAL
-            )
-          : null,
+      limiter: notificationRateLimit
+        ? new BucketRateLimiter(
+            notificationRateLimit.capacity || NOTIFICATION_CAPACITY,
+            notificationRateLimit.interval || NOTIFICATION_INTERVAL
+          )
+        : null,
       timeout: notificationRateLimit?.timeout || NOTIFICATION_TIMEOUT
     }
 
@@ -353,11 +352,11 @@ class BlindPeering {
   }
 
   close() {
-    if (this.closed) return
     this._stopGC()
     this._gc = new Set()
     this.dht.off('network-change', this._bumpBound)
     this.notificationRate.limiter?.destroy()
+    this.notificationRate.limiter = null
     for (const peer of this.blindPeers.values()) peer.destroy()
     this.blindPeers.clear()
     this.closed = true
