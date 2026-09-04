@@ -67,9 +67,9 @@ class BlindPeering {
     this.backoffResetWait = backoffResetWait
     this.notificationRate = {
       limiter:
-        notificationRateLimit?.capacity > 0
+        notificationRateLimit
           ? new BucketRateLimiter(
-              notificationRateLimit.capacity,
+              notificationRateLimit.capacity || NOTIFICATION_CAPACITY,
               notificationRateLimit.interval || NOTIFICATION_INTERVAL
             )
           : null,
