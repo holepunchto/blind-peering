@@ -507,6 +507,11 @@ class BlindPeer {
   }
 
   _flushAutobase(auto, info, visited = new Set()) {
+    if (info.isBee && !info.cores) {
+      info.flushed = this.connects
+      return
+    }
+
     const viewBatch = {
       priority: info.priority,
       referrer: null,
@@ -523,9 +528,17 @@ class BlindPeer {
       visited
     }
 
-    addViewCores(viewBatch, auto, this.peering.maxBatchMax, info.additionalViews)
-
-    addWriterCores(writerBatch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    if (info.isBee) {
+      for (const key of info.cores.writers) {
+        writerBatch.cores.push({ key, length: 0 })
+      }
+      for (const key of info.cores.views) {
+        viewBatch.cores.push({ key, length: 0 })
+      }
+    } else {
+      addViewCores(viewBatch, auto, this.peering.maxBatchMax)
+      addWriterCores(writerBatch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    }
 
     info.flushed = this.connects
 
@@ -628,10 +641,7 @@ class BlindPeer {
     this.update()
   }
 
-  addAutobase(
-    auto,
-    { target, referrer = null, priority = 1, announce = false, additionalViews = [], pick } = {}
-  ) {
+  addAutobase(auto, { target, referrer = null, priority = 1, announce = false, pick } = {}) {
     if (this.bases.has(auto)) return
     this.peering.stats.addAutobase++
 
@@ -639,9 +649,10 @@ class BlindPeer {
       priority,
       announce,
       referrer,
-      additionalViews,
       target,
       pick,
+      isBee: !auto.core,
+      cores: null,
       flushed: 0,
       flushedWriterBatch: false,
       flushTimeout: null,
@@ -658,6 +669,7 @@ class BlindPeer {
       this.bases.delete(auto)
       this.update()
       auto.off('close', onclose)
+      auto.off('appending', onappending)
       auto.core?.off('migrate', onmigrate)
     }
 
@@ -675,6 +687,31 @@ class BlindPeer {
       info.destroy()
     }
 
+    const oncores = (cores) => {
+      if (this.peering.closed) return
+
+      let updated = false
+
+      for (const key of cores.views) {
+        const size = visited.size
+        visited.add(b4a.toString(key, 'hex'))
+        if (visited.size !== size) updated = true
+      }
+      for (const key of cores.writers) {
+        visited.add(b4a.toString(key, 'hex'))
+      }
+
+      if (!updated) return
+
+      info.cores = cores
+
+      if (this.connected) {
+        this._flushAutobase(auto, info, visited)
+      } else {
+        this.update()
+      }
+    }
+
     const onmigrate = () => {
       // TODO: cleanly
       // Context: the views have not yet rotated after 'migrate' triggers. For that, we need to wait for the 'reboot' event.
@@ -682,6 +719,13 @@ class BlindPeer {
       // This hack makes it so that in practice we only flush after the reboot
       setTimeout(() => {
         if (this.peering.closed) return
+        if (auto.closed) return
+
+        if (info.isBee) {
+          auto.cores({ wait: true, all: true, local: true }).then(oncores)
+          return
+        }
+
         if (this.connected) {
           return this._flushAutobase(auto, info)
         }
@@ -694,6 +738,7 @@ class BlindPeer {
       if (info.flushedWriterBatch) return
       info.flushedWriterBatch = true
       info.cleanup()
+
       if (this.connected) {
         this._flushAutobase(auto, info, visited)
       } else {
@@ -701,10 +746,12 @@ class BlindPeer {
       }
     }
 
+    auto.on('appending', onappending)
     auto.on('close', onclose)
 
-    // autobase only
-    if (auto.core) {
+    if (info.isBee) {
+      auto.cores({ wait: true, all: true, local: true }).then(oncores)
+    } else {
       auto.core.on('migrate', onmigrate)
     }
 
@@ -721,6 +768,16 @@ class BlindPeer {
     auto.on('writer', onwriter)
 
     this.update()
+
+    function onappending(batch) {
+      const last = batch[batch.length - 1]
+      if (last.trusted && last.trusted.length > 0) {
+        if (visited.has(b4a.toString(last.trusted[0].key, 'hex'))) {
+          return
+        }
+        onmigrate()
+      }
+    }
   }
 
   async sendNotification(request) {
@@ -804,13 +861,8 @@ function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
   }
 }
 
-function addViewCores(batch, auto, maxBatchMax, additionalViews) {
+function addViewCores(batch, auto, maxBatchMax) {
   for (const view of auto.views()) {
-    addCore(batch, view.key, view.signedLength)
-  }
-
-  for (let i = 0; i < additionalViews.length && batch.cores.length < maxBatchMax; i++) {
-    const view = additionalViews[i]
     addCore(batch, view.key, view.signedLength)
   }
 }
