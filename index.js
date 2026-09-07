@@ -352,10 +352,11 @@ class BlindPeering {
   }
 
   close() {
+    if (this.closed) return
     this._stopGC()
     this._gc = new Set()
     this.dht.off('network-change', this._bumpBound)
-    if (this.notificationRate.limiter?.destroyed === false) this.notificationRate.limiter.destroy()
+    this.notificationRate.limiter?.destroy()
     for (const peer of this.blindPeers.values()) peer.destroy()
     this.blindPeers.clear()
     this.closed = true
