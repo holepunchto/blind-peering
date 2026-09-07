@@ -507,7 +507,7 @@ class BlindPeer {
   }
 
   _flushAutobase(auto, info, visited = new Set()) {
-    if (info.isBee && !info.cores) {
+    if (info.isBee && !info.views) {
       info.flushed = this.connects
       return
     }
@@ -516,7 +516,7 @@ class BlindPeer {
       priority: info.priority,
       referrer: null,
       announce: info.announce,
-      cores: [],
+      cores: info.views || [],
       visited
     }
 
@@ -524,18 +524,11 @@ class BlindPeer {
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
-      cores: [],
+      cores: info.writers || [],
       visited
     }
 
-    if (info.isBee) {
-      for (const key of info.cores.writers) {
-        writerBatch.cores.push({ key, length: 0 })
-      }
-      for (const key of info.cores.views) {
-        viewBatch.cores.push({ key, length: 0 })
-      }
-    } else {
+    if (!info.views) {
       addViewCores(viewBatch, auto, this.peering.maxBatchMax)
       addWriterCores(writerBatch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
     }
@@ -652,7 +645,8 @@ class BlindPeer {
       target,
       pick,
       isBee: !auto.core,
-      cores: null,
+      views: null,
+      writers: null,
       flushed: 0,
       flushedWriterBatch: false,
       flushTimeout: null,
@@ -687,7 +681,7 @@ class BlindPeer {
       info.destroy()
     }
 
-    const oncores = (cores) => {
+    const oncores = async (cores) => {
       if (this.peering.closed) return
 
       let updated = false
@@ -703,7 +697,23 @@ class BlindPeer {
 
       if (!updated) return
 
-      info.cores = cores
+      const storage = this.peering.store.storage
+      const settings = { auth: false, head: true, hints: false }
+      const viewInfo = await storage.getInfos(cores.views.map(hcCrypto.discoveryKey), settings)
+      const writerInfo = await storage.getInfos(cores.writers.map(hcCrypto.discoveryKey), settings)
+      if (this.peering.closed) return
+
+      info.views = []
+      info.writers = []
+
+      for (let i = 0; i < viewInfo.length; i++) {
+        const head = viewInfo[i].head
+        info.views.push({ key: cores.views[i], length: head ? head.length : 0 })
+      }
+      for (let i = 0; i < writerInfo.length; i++) {
+        const head = writerInfo[i].head
+        info.writers.push({ key: cores.writers[i], length: head ? head.length : 0 })
+      }
 
       if (this.connected) {
         this._flushAutobase(auto, info, visited)
@@ -722,7 +732,7 @@ class BlindPeer {
         if (auto.closed) return
 
         if (info.isBee) {
-          auto.cores({ wait: true, all: true, local: true }).then(oncores)
+          auto.cores({ wait: true, all: true, local: true }).then(oncores, noop)
           return
         }
 
@@ -750,7 +760,7 @@ class BlindPeer {
     auto.on('close', onclose)
 
     if (info.isBee) {
-      auto.cores({ wait: true, all: true, local: true }).then(oncores)
+      auto.cores({ wait: true, all: true, local: true }).then(oncores, noop)
     } else {
       auto.core.on('migrate', onmigrate)
     }
@@ -934,3 +944,5 @@ function toBlindPeerInfos(blindPeers) {
     return { key, encodedKey, group: blindPeer.group }
   })
 }
+
+function noop() {}
