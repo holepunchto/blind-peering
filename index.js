@@ -670,6 +670,7 @@ class BlindPeer {
     this.bases.set(auto, info)
 
     const visited = new Set() // to avoid duplicates when sending the writer batch
+    const writers = new Set()
 
     const onwriter = () => {
       if (info.flushedWriterBatch) return // race condition
@@ -784,9 +785,9 @@ class BlindPeer {
     function onappending(batch) {
       const last = batch[batch.length - 1]
       if (last.trusted && last.trusted.length > 0) {
-        if (visited.has(b4a.toString(last.trusted[0].key, 'hex'))) {
-          return
-        }
+        const id = b4a.toString(last.trusted[0].key, 'hex')
+        if (writers.has(id)) return
+        writers.add(id)
         onmigrate()
       }
     }
