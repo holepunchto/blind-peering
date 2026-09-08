@@ -751,6 +751,8 @@ class BlindPeer {
         const head = writerInfo[i] ? writerInfo[i].head : null
         info.writers.push({ key: cores.writers[i], length: head ? head.length : 0 })
       }
+
+      flushOrUpdate()
     }
 
     const onmigrate = () => {
