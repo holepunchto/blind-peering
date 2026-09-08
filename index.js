@@ -537,6 +537,7 @@ class BlindPeer {
 
     if (writerBatch.cores.length + viewBatch.cores.length === 0) return
 
+    console.log('flushing writers', writerBatch.cores.length, 'views', viewBatch.cores.length)
     this.channel.addCores(writerBatch)
     this.channel.addCores(viewBatch)
 
@@ -783,7 +784,18 @@ class BlindPeer {
 
     function onappending(batch) {
       const last = batch[batch.length - 1]
+      console.log(
+        'onappending runs with batch length.',
+        batch.length,
+        'Last trusted?',
+        last?.trusted
+      )
+
       if (last.trusted && last.trusted.length > 0) {
+        console.log(
+          'last is trusted. We already have it (So skipped)?',
+          visited.has(b4a.toString(last.trusted[0].key, 'hex'))
+        )
         if (visited.has(b4a.toString(last.trusted[0].key, 'hex'))) {
           return
         }
