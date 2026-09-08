@@ -692,7 +692,9 @@ class BlindPeer {
         if (visited.size !== size) updated = true
       }
       for (const key of cores.writers) {
+        const size = visited.size
         visited.add(b4a.toString(key, 'hex'))
+        if (visited.size !== size) updated = true
       }
 
       if (!updated) return
