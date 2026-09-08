@@ -728,7 +728,7 @@ class BlindPeer {
         if (visited.size === size) continue
         updated = true
         const key = b4a.from(id, 'hex')
-        core.writers.push(key)
+        cores.writers.push(key)
       }
 
       pendingWriters.clear()
@@ -741,7 +741,7 @@ class BlindPeer {
       if (this.peering.closed) return
 
       info.views = []
-      info.writers = newWriters
+      info.writers = []
 
       for (let i = 0; i < viewInfo.length; i++) {
         const head = viewInfo[i] ? viewInfo[i].head : null
