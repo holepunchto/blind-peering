@@ -529,7 +529,7 @@ class BlindPeer {
     }
 
     if (!info.views) {
-      addViewCores(viewBatch, auto, this.peering.maxBatchMax)
+      addViewCores(viewBatch, auto)
       addWriterCores(writerBatch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
     }
 
@@ -871,7 +871,7 @@ function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
   }
 }
 
-function addViewCores(batch, auto, maxBatchMax) {
+function addViewCores(batch, auto) {
   for (const view of auto.views()) {
     addCore(batch, view.key, view.signedLength)
   }
