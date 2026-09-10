@@ -507,11 +507,16 @@ class BlindPeer {
   }
 
   _flushAutobase(auto, info, visited = new Set()) {
+    if (info.isBee && !info.views) {
+      info.flushed = this.connects
+      return
+    }
+
     const viewBatch = {
       priority: info.priority,
       referrer: null,
       announce: info.announce,
-      cores: [],
+      cores: info.views || [],
       visited
     }
 
@@ -519,13 +524,14 @@ class BlindPeer {
       priority: info.priority,
       referrer: info.referrer,
       announce: info.announce,
-      cores: [],
+      cores: info.writers || [],
       visited
     }
 
-    addViewCores(viewBatch, auto, this.peering.maxBatchMax, info.additionalViews)
-
-    addWriterCores(writerBatch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    if (!info.views) {
+      addViewCores(viewBatch, auto)
+      addWriterCores(writerBatch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
+    }
 
     info.flushed = this.connects
 
@@ -628,10 +634,7 @@ class BlindPeer {
     this.update()
   }
 
-  addAutobase(
-    auto,
-    { target, referrer = null, priority = 1, announce = false, additionalViews = [], pick } = {}
-  ) {
+  addAutobase(auto, { target, referrer = null, priority = 1, announce = false, pick } = {}) {
     if (this.bases.has(auto)) return
     this.peering.stats.addAutobase++
 
@@ -639,9 +642,11 @@ class BlindPeer {
       priority,
       announce,
       referrer,
-      additionalViews,
       target,
       pick,
+      isBee: !auto.core,
+      views: null,
+      writers: null,
       flushed: 0,
       flushedWriterBatch: false,
       flushTimeout: null,
@@ -658,21 +663,96 @@ class BlindPeer {
       this.bases.delete(auto)
       this.update()
       auto.off('close', onclose)
+      auto.off('appending', onappending)
       auto.core?.off('migrate', onmigrate)
     }
 
     this.bases.set(auto, info)
 
     const visited = new Set() // to avoid duplicates when sending the writer batch
+    const writers = new Set()
+    const pendingWriters = new Set()
 
-    const onwriter = () => {
-      if (info.flushedWriterBatch) return // race condition
+    const queueFlush = () => {
       clearTimeout(info.flushTimeout)
       info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
     }
 
+    const flushOrUpdate = () => {
+      if (this.connected) {
+        this._flushAutobase(auto, info, visited)
+      } else {
+        this.update()
+      }
+    }
+
+    const onwriter = (w) => {
+      // if if a static core we must queue now for flushing cause no one else will
+      if (isStaticCore(w.core)) {
+        pendingWriters.add(b4a.toString(w.core.key, 'hex'))
+        queueFlush()
+        return
+      }
+      if (!info.isBee) queueFlush()
+    }
+
     const onclose = () => {
       info.destroy()
+    }
+
+    const bump = () => {
+      auto.cores({ wait: true, all: true, local: true }).then(oncores, noop)
+    }
+
+    const oncores = async (cores) => {
+      if (this.peering.closed) return
+
+      let updated = false
+
+      for (const key of cores.views) {
+        const size = visited.size
+        const id = b4a.toString(key, 'hex')
+        visited.add(id)
+        if (visited.size !== size) updated = true
+      }
+      for (const key of cores.writers) {
+        const size = visited.size
+        const id = b4a.toString(key, 'hex')
+        visited.add(id)
+        if (visited.size !== size) updated = true
+      }
+
+      for (const id of pendingWriters) {
+        const size = visited.size
+        visited.add(id)
+        if (visited.size === size) continue
+        updated = true
+        const key = b4a.from(id, 'hex')
+        cores.writers.push(key)
+      }
+
+      pendingWriters.clear()
+      if (!updated) return
+
+      const storage = this.peering.store.storage
+      const settings = { auth: false, head: true, hints: false }
+      const viewInfo = await storage.getInfos(cores.views.map(hcCrypto.discoveryKey), settings)
+      const writerInfo = await storage.getInfos(cores.writers.map(hcCrypto.discoveryKey), settings)
+      if (this.peering.closed) return
+
+      info.views = []
+      info.writers = []
+
+      for (let i = 0; i < viewInfo.length; i++) {
+        const head = viewInfo[i] ? viewInfo[i].head : null
+        info.views.push({ key: cores.views[i], length: head ? head.length : 0 })
+      }
+      for (let i = 0; i < writerInfo.length; i++) {
+        const head = writerInfo[i] ? writerInfo[i].head : null
+        info.writers.push({ key: cores.writers[i], length: head ? head.length : 0 })
+      }
+
+      flushOrUpdate()
     }
 
     const onmigrate = () => {
@@ -682,29 +762,36 @@ class BlindPeer {
       // This hack makes it so that in practice we only flush after the reboot
       setTimeout(() => {
         if (this.peering.closed) return
-        if (this.connected) {
-          return this._flushAutobase(auto, info)
+        if (auto.closed) return
+
+        if (info.isBee) {
+          bump()
+          return
         }
-        return this.update()
+
+        flushOrUpdate()
       }, 500).unref()
     }
 
     const flushWriterBatch = () => {
       if (this.destroyed) return
-      if (info.flushedWriterBatch) return
-      info.flushedWriterBatch = true
-      info.cleanup()
-      if (this.connected) {
-        this._flushAutobase(auto, info, visited)
+
+      if (info.isBee) {
+        bump()
       } else {
-        this.update()
+        if (info.flushedWriterBatch) return
+        info.flushedWriterBatch = true
+        info.cleanup()
+        flushOrUpdate()
       }
     }
 
+    auto.on('appending', onappending)
     auto.on('close', onclose)
 
-    // autobase only
-    if (auto.core) {
+    if (info.isBee) {
+      bump()
+    } else {
       auto.core.on('migrate', onmigrate)
     }
 
@@ -713,14 +800,27 @@ class BlindPeer {
       this._flushAutobase(auto, info, visited)
     }
 
-    // Optimisation: schedule a second flush for any additional writer cores we discover
-    // Note: we only do this once. Writers appearing later need to be added by others
-    this._pendingFlushes.set(auto, info)
-    info.maxTimeout = setTimeout(flushWriterBatch, this.peering.batchMaxWait)
-    info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
+    if (!info.isBee) {
+      // Optimisation: schedule a second flush for any additional writer cores we discover
+      // Note: we only do this once. Writers appearing later need to be added by others
+      this._pendingFlushes.set(auto, info)
+      info.maxTimeout = setTimeout(flushWriterBatch, this.peering.batchMaxWait)
+      info.flushTimeout = null
+    }
+
     auto.on('writer', onwriter)
 
     this.update()
+
+    function onappending(batch) {
+      const last = batch[batch.length - 1]
+      if (last.trusted && last.trusted.length > 0) {
+        const id = b4a.toString(last.trusted[0].key, 'hex')
+        if (writers.has(id)) return
+        writers.add(id)
+        onmigrate()
+      }
+    }
   }
 
   async sendNotification(request) {
@@ -804,13 +904,8 @@ function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
   }
 }
 
-function addViewCores(batch, auto, maxBatchMax, additionalViews) {
+function addViewCores(batch, auto) {
   for (const view of auto.views()) {
-    addCore(batch, view.key, view.signedLength)
-  }
-
-  for (let i = 0; i < additionalViews.length && batch.cores.length < maxBatchMax; i++) {
-    const view = additionalViews[i]
     addCore(batch, view.key, view.signedLength)
   }
 }
@@ -882,3 +977,5 @@ function toBlindPeerInfos(blindPeers) {
     return { key, encodedKey, group: blindPeer.group }
   })
 }
+
+function noop() {}
