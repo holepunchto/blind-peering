@@ -688,9 +688,9 @@ class BlindPeer {
       }
     }
 
-    const onanchor = (anchor, core) => {
-      if (auto.local && auto.local.key && b4a.equals(auto.local.key, anchor.key)) {
-        pendingWriters.add(b4a.toString(core.key, 'hex'))
+    const onanchor = (anchor, link) => {
+      if (auto.local && auto.local.key && b4a.equals(auto.local.key, link.key)) {
+        pendingWriters.add(b4a.toString(anchor.key, 'hex'))
         queueFlush()
       }
     }
