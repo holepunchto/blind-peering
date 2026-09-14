@@ -688,7 +688,7 @@ class BlindPeer {
       }
     }
 
-    const onanchor = (core, anchor) => {
+    const onanchor = (anchor, core) => {
       if (auto.local && auto.local.key && b4a.equals(auto.local.key, anchor.key)) {
         pendingWriters.add(b4a.toString(core.key, 'hex'))
         queueFlush()
