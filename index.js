@@ -688,6 +688,13 @@ class BlindPeer {
       }
     }
 
+    const onanchor = (anchor, core) => {
+      if (auto.local && auto.local.key && b4a.equals(auto.local.key, anchor.key)) {
+        pendingWriters.add(b4a.toString(core.key, 'hex'))
+        queueFlush()
+      }
+    }
+
     const onwriter = (w) => {
       // if if a static core we must queue now for flushing cause no one else will
       if (isStaticCore(w.core)) {
@@ -811,6 +818,7 @@ class BlindPeer {
     }
 
     auto.on('writer', onwriter)
+    auto.on('anchor', onanchor)
 
     this.update()
 
