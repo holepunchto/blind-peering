@@ -315,8 +315,10 @@ class BlindPeering {
 
     const closestMirrors = getClosestMirrorList(target, mirrors, this.pick)
     const peers = closestMirrors.map((mirror) => this._getBlindPeer(mirror.encodedKey))
-    const connectedPeer = peers.find((peer) => peer.connected)
-    if (connectedPeer) {
+    const connectedPeers = peers.filter((peer) => peer.connected)
+    if (connectedPeers.length) {
+      // TODO: Use random selection for now to keep the implementation simple.
+      const connectedPeer = connectedPeers[Math.floor(Math.random() * connectedPeers.length)]
       await connectedPeer.sendNotification(request)
       return
     }
