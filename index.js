@@ -661,11 +661,12 @@ class BlindPeer {
       }
     }
     info.destroy = () => {
-      info.cleanup() // We can't reasonable flush anymore: no guarantees on core lengths etc of closed cores
+      info.cleanup() // We can't reasonably flush anymore: no guarantees on core lengths etc of closed cores
       this.bases.delete(auto)
       this.update()
       auto.off('close', onclose)
       auto.off('appending', onappending)
+      auto.off('anchor', onanchor)
       auto.core?.off('migrate', onmigrate)
     }
 
@@ -696,7 +697,7 @@ class BlindPeer {
     }
 
     const onwriter = (w) => {
-      // if if a static core we must queue now for flushing cause no one else will
+      // if it's a static core we must queue now for flushing cause no one else will
       if (isStaticCore(w.core)) {
         pendingWriters.add(b4a.toString(w.core.key, 'hex'))
         queueFlush()
