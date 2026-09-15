@@ -504,8 +504,7 @@ class BlindPeer {
 
     addCore(batch, core.key, core.length)
     info.flushed = this.connects
-    this.channel.addCores(batch)
-    this.peering.stats.addCoresTx++ // TODO: track elsewhere
+    this._sendCores(batch)
   }
 
   _flushAutobase(auto, info, visited = new Set()) {
@@ -537,12 +536,8 @@ class BlindPeer {
 
     info.flushed = this.connects
 
-    if (writerBatch.cores.length + viewBatch.cores.length === 0) return
-
-    this.channel.addCores(writerBatch)
-    this.channel.addCores(viewBatch)
-
-    this.peering.stats.addCoresTx += 2 // TODO: track elsewhere
+    this._sendCores(writerBatch)
+    this._sendCores(viewBatch)
   }
 
   _flush() {
@@ -565,6 +560,12 @@ class BlindPeer {
     }
 
     if (total > 1) this.channel.uncork()
+  }
+
+  _sendCores(batch) {
+    if (!batch.cores.length) return
+    this.channel.addCores(batch)
+    this.peering.stats.addCoresTx++
   }
 
   update() {
