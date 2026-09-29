@@ -35,6 +35,7 @@ class BlindPeering {
       batchIdleWait = BATCH_IDLE_WAIT,
       batchMaxWait = BATCH_MAX_WAIT,
       backoffResetWait = 10000,
+      client = null,
       notificationRateLimit = {
         capacity: NOTIFICATION_CAPACITY,
         interval: NOTIFICATION_INTERVAL,
@@ -82,6 +83,11 @@ class BlindPeering {
       notificationsTx: 0
     }
 
+    this._handshake = {
+      blindPeeringVersion: version,
+      clientName: client?.name ?? null,
+      clientVersion: client?.version ?? null
+    }
     this._gc = new Set()
     this._gcTimer = null
     this._runGCBound = this._runGC.bind(this)
@@ -451,7 +457,7 @@ class BlindPeer {
       })
 
       const channel = new BlindPeerMuxer(socket, {
-        handshake: { blindPeeringVersion: version },
+        handshake: this.peering._handshake,
         onclose: (remote) => {
           const connected = this.connected
           socket.destroy()
