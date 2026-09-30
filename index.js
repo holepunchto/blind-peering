@@ -85,8 +85,8 @@ class BlindPeering {
 
     this._handshake = {
       blindPeeringVersion: version,
-      clientName: client?.name ?? null,
-      clientVersion: client?.version ?? null
+      clientName: client?.name,
+      clientVersion: client?.version
     }
     this._gc = new Set()
     this._gcTimer = null
