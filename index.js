@@ -40,7 +40,8 @@ class BlindPeering {
         capacity: NOTIFICATION_CAPACITY,
         interval: NOTIFICATION_INTERVAL,
         timeout: NOTIFICATION_TIMEOUT
-      }
+      },
+      skipConnectionMetadata = false
     } = opts
 
     this.dht = dht
@@ -83,10 +84,11 @@ class BlindPeering {
       notificationsTx: 0
     }
 
-    this._handshake = {
-      blindPeeringVersion: version,
-      clientName: client?.name,
-      clientVersion: client?.version
+    this._handshake = {}
+    if (!skipConnectionMetadata) {
+      this._handshake.blindPeeringVersion = version
+      this._handshake.clientName = client?.name
+      this._handshake.clientVersion = client?.version
     }
     this._gc = new Set()
     this._gcTimer = null
