@@ -22,6 +22,7 @@ Create a new Blind Peering instance. `dht` is a HyperDHT instance and `store` is
 - `notificationRateLimit`: `{ capacity: 10, interval: 1000, timeout: 10000 }` rate limit for `sendNotification`. Pass `null` to disable.
 - `client`: `{ name, version }` optional identifier of the application using blind-peering, sent to blind peers in the connection handshake.
 - `skipConnectionMetadata` if set to `true`, client does not include any non-essential metadata in the connection to the blind peer.
+
 #### `blindPeering.setBlindPeers(blindPeers)`
 
 Replace the list of blind peers, in the same `{ key, group }` form the constructor takes, and re-add the currently mirrored cores and autobases to the new set.
