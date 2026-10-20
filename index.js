@@ -7,6 +7,7 @@ const HyperDHTAddress = require('hyperdht-address')
 const safetyCatch = require('safety-catch')
 const BucketRateLimiter = require('bucket-rate-limit')
 const Backoff = require('./lib/backoff.js')
+const os = require('os')
 const { version } = require('./package.json')
 
 const DEFAULT_BACKOFF = [
@@ -89,6 +90,7 @@ class BlindPeering {
       this._handshake.blindPeeringVersion = version
       this._handshake.clientName = client?.name
       this._handshake.clientVersion = client?.version
+      this._handshake.platformOs = os.platform()
     }
     this._gc = new Set()
     this._gcTimer = null
