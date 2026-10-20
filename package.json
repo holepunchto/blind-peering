@@ -13,7 +13,8 @@
   ],
   "dependencies": {
     "b4a": "^1.6.7",
-    "blind-peer-muxer": "^1.6.0",
+    "bare-os": "^3.9.3",
+    "blind-peer-muxer": "^1.8.0",
     "bucket-rate-limit": "^1.0.0",
     "hypercore-crypto": "^3.5.0",
     "hypercore-id-encoding": "^1.3.0",
@@ -36,5 +37,11 @@
     "lunte": "^1.6.0",
     "prettier": "^3.6.2",
     "prettier-config-holepunch": "^2.0.0"
+  },
+  "imports": {
+    "os": {
+      "bare": "bare-os",
+      "default": "os"
+    }
   }
 }
