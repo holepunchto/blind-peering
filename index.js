@@ -90,7 +90,7 @@ class BlindPeering {
       this._handshake.blindPeeringVersion = version
       this._handshake.clientName = client?.name
       this._handshake.clientVersion = client?.version
-      this._handshake.platformOs = os.platform()
+      this._handshake.osPlatform = os.platform()
     }
     this._gc = new Set()
     this._gcTimer = null
