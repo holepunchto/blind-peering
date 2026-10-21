@@ -325,22 +325,27 @@ class BlindPeering {
 
     const closestMirrors = getClosestMirrorList(target, mirrors, this.pick)
     const peers = closestMirrors.map((mirror) => this._getBlindPeer(mirror.encodedKey))
-    const connectedPeers = peers.filter((peer) => peer.connected)
-    if (connectedPeers.length) {
-      // TODO: Use random selection for now to keep the implementation simple.
-      const connectedPeer = connectedPeers[Math.floor(Math.random() * connectedPeers.length)]
-      await connectedPeer.sendNotification(request)
-      return
-    }
-    for (const peer of peers) {
+    // shuffle peers for random selection, giving priority to connected ones
+    const sortedPeers = peers
+      .map((peer) => ({ peer, rand: Math.random() }))
+      .sort((lhs, rhs) => {
+        if (lhs.peer.connected === lhs.peer.connected) return rhs.rand - lhs.rand
+        if (lhs.peer.connected) return -1
+        return 1
+      })
+      .map(({ peer }) => peer)
+
+    const errors = []
+    for (const peer of sortedPeers) {
       try {
         await peer.sendNotification(request)
         return
       } catch (e) {
         safetyCatch(e)
+        errors.push(e)
       }
     }
-    throw new Error('No peers available')
+    throw new AggregateError(errors, 'No peers available')
   }
 
   sendNotificationBackground(core, opts) {
@@ -574,7 +579,7 @@ class BlindPeer {
 
   _sendCores(batch) {
     if (!batch.cores.length) return
-    this.channel.addCores(batch)
+    this.channel.requestAddCores(batch).catch(safetyCatch) // TODO use this response for dedup
     this.peering.stats.addCoresTx++
   }
 
@@ -868,7 +873,7 @@ class BlindPeer {
         }
       }
       if (!this.connected) throw new Error('Could not connect')
-      await this.channel.sendNotification(request)
+      await this.channel.requestSendNotification(request)
       this.peering.stats.notificationsTx++
     } finally {
       this.pendingNotifications--
