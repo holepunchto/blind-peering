@@ -677,7 +677,6 @@ class BlindPeer {
       this.update()
       auto.off('close', onclose)
       auto.off('appending', onappending)
-      auto.off('anchor', onanchor)
       auto.core?.off('migrate', onmigrate)
     }
 
@@ -697,13 +696,6 @@ class BlindPeer {
         this._flushAutobase(auto, info, visited)
       } else {
         this.update()
-      }
-    }
-
-    const onanchor = (anchor, link) => {
-      if (auto.local && auto.local.key && b4a.equals(auto.local.key, link.key)) {
-        pendingWriters.add(b4a.toString(anchor.key, 'hex'))
-        queueFlush()
       }
     }
 
@@ -830,7 +822,6 @@ class BlindPeer {
     }
 
     auto.on('writer', onwriter)
-    auto.on('anchor', onanchor)
 
     this.update()
 
