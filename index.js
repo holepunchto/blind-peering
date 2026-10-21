@@ -200,7 +200,7 @@ class BlindPeering {
     const mirrors = this._getMirrors(blindPeers, keys)
 
     await auto.ready()
-    if (auto.closing) return
+    if (auto.closing || this.closed) return
 
     if (!target) target = auto.wakeupCapability.key
     if (!referrer) referrer = target
@@ -266,7 +266,7 @@ class BlindPeering {
     const mirrors = this._getMirrors(blindPeers, keys)
 
     await core.ready()
-    if (core.closing) return
+    if (core.closing || this.closed) return
 
     if (!target) target = core.key
 
@@ -303,7 +303,7 @@ class BlindPeering {
     const mirrors = this._getMirrors(blindPeers, keys)
 
     await core.ready()
-    if (core.closing) return
+    if (core.closing || this.closed) return
 
     roomKey ??= core.key
     roomDiscoveryKey ??= hcCrypto.discoveryKey(roomKey)
