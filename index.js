@@ -291,6 +291,7 @@ class BlindPeering {
       roomKey = null,
       roomDiscoveryKey = null,
       index = null,
+      upgradeLength = null,
       target = null,
       keys = null,
       blindPeers = null,
@@ -320,7 +321,8 @@ class BlindPeering {
         discoveryKey: roomDiscoveryKey
       },
       extra,
-      appId
+      appId,
+      upgradeLength
     }
 
     const closestMirrors = getClosestMirrorList(target, mirrors, this.pick)
