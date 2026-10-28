@@ -341,6 +341,7 @@ class BlindPeering {
         await peer.sendNotification(request)
         return
       } catch (e) {
+        if (this.closed) return
         safetyCatch(e)
         errors.push(e)
       }
