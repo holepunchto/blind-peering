@@ -329,7 +329,7 @@ class BlindPeering {
     const sortedPeers = peers
       .map((peer) => ({ peer, rand: Math.random() }))
       .sort((lhs, rhs) => {
-        if (lhs.peer.connected === lhs.peer.connected) return rhs.rand - lhs.rand
+        if (lhs.peer.connected === rhs.peer.connected) return rhs.rand - lhs.rand
         if (lhs.peer.connected) return -1
         return 1
       })
