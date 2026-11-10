@@ -695,6 +695,9 @@ class BlindPeer {
     const writers = new Set()
     const pendingWriters = new Set()
 
+    let recursive = false // true once a recursive cores call has finished
+    let bumps = 0
+
     const queueFlush = () => {
       clearTimeout(info.flushTimeout)
       info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
@@ -729,8 +732,42 @@ class BlindPeer {
       info.destroy()
     }
 
-    const bump = () => {
-      auto.cores({ wait: true, all: true, local: true }).then(oncores, noop)
+    const bump = async () => {
+      bumps++
+
+      while (!this.peering.closed && bumps === 1) {
+        try {
+          const cores = await auto.cores({
+            wait: true,
+            all: true,
+            local: true,
+            recursive,
+            timeout: recursive ? 10_000 : 0
+          })
+
+          await oncores(cores)
+
+          if (!this.peering.closed && !recursive && (await auto.isLocalTrusted())) {
+            const rcores = await auto.cores({
+              wait: true,
+              all: true,
+              local: true,
+              recursive: true,
+              timeout: 10_000
+            })
+
+            await oncores(rcores)
+            recursive = true
+          }
+        } catch (err) {
+          safetyCatch(err)
+        }
+
+        if (bumps === 1) break
+        bumps = 1
+      }
+
+      if (bumps === 1) bumps = 0
     }
 
     const oncores = async (cores) => {
@@ -1007,5 +1044,3 @@ function toBlindPeerInfos(blindPeers) {
     return { key, encodedKey, group: blindPeer.group }
   })
 }
-
-function noop() {}
