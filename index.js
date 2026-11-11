@@ -747,7 +747,7 @@ class BlindPeer {
 
           await oncores(cores)
 
-          if (!this.peering.closed && !recursive && (await auto.isLocalTrusted())) {
+          if (!this.peering.closed && !recursive && (await auto.isLocalTrusted?.())) {
             const rcores = await auto.cores({
               wait: true,
               all: true,
