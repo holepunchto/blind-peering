@@ -363,7 +363,7 @@ class BlindPeering {
       timer = setTimeout(() => {
         reject(new Error('Timed out'))
       }, this.notificationRate.timeout)
-      timer.unref()
+      timer.unref?.()
     })
     totalTimeoutAbort.catch(safetyCatch)
 
@@ -503,7 +503,7 @@ class BlindPeer {
       if (this.destroyed) return
       const stayedConnected = connectAttempt === this.connects
       if (stayedConnected) this.backoff.reset() // Otherwise the connection probably errored, so avoid reconnect loop
-    }, this.backoffResetWait).unref()
+    }, this.backoffResetWait).unref?.()
     this.update()
   }
 
@@ -836,7 +836,7 @@ class BlindPeer {
         }
 
         flushOrUpdate()
-      }, 500).unref()
+      }, 500).unref?.()
     }
 
     const flushWriterBatch = () => {
@@ -905,7 +905,7 @@ class BlindPeer {
               timeout = setTimeout(() => {
                 reject(new Error('Timed out'))
               }, 5_000)
-              timeout.unref()
+              timeout.unref?.()
             })
           ])
         } finally {
