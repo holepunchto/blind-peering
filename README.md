@@ -82,3 +82,9 @@ Resume activity after having been suspended.
 #### `await blindPeering.close()`
 
 Close the blind peering instance.
+
+#### `const picked = BlindPeering.pickBlindPeers(target, blindPeers, n)`
+
+Pick the `n` blind peers closest (using XOR distance) to `target`, from different groups where possible, the same way `addCore`, `addAutobase` and `sendNotification` pick them.
+
+`blindPeers` is a list of `{ key, group }` blind peers, in the same form the constructor takes. Returns the picked entries from that list, without reordering it.

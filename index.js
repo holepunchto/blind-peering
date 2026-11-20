@@ -932,6 +932,7 @@ class BlindPeer {
 }
 
 module.exports = BlindPeering
+module.exports.pickBlindPeers = pickBlindPeers
 
 function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
   addCore(batch, auto.local.key, auto.local.length)
@@ -1043,4 +1044,17 @@ function toBlindPeerInfos(blindPeers) {
     const { key, encodedKey } = decodeKey(blindPeer.key)
     return { key, encodedKey, group: blindPeer.group }
   })
+}
+
+function pickBlindPeers(target, blindPeers, n) {
+  const infos = toBlindPeerInfos(blindPeers)
+
+  const blindPeersByKey = new Map()
+  for (let i = 0; i < infos.length; i++) {
+    blindPeersByKey.set(infos[i].encodedKey, blindPeers[i])
+  }
+
+  const closest = getClosestMirrorList(target, infos, n)
+
+  return closest.map((info) => blindPeersByKey.get(info.encodedKey))
 }
