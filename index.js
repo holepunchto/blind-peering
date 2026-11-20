@@ -1,47 +1,28 @@
 const BlindPeerMuxer = require('blind-peer-muxer')
-const xorDistance = require('xor-distance')
 const b4a = require('b4a')
-const hcCrypto = require('hypercore-crypto')
-const ID = require('hypercore-id-encoding')
 const HyperDHTAddress = require('hyperdht-address')
 const safetyCatch = require('safety-catch')
-const BucketRateLimiter = require('bucket-rate-limit')
 const Backoff = require('./lib/backoff.js')
 const os = require('os')
 const { version } = require('./package.json')
-
+const rrp = require('resolve-reject-promise')
 const DEFAULT_BACKOFF = [
   0, 1000, 1000, 1000, 2000, 2000, 3000, 3000, 5000, 5000, 15000, 30000, 60000
 ]
-const MAX_BATCH_MIN = 3
-const MAX_BATCH_MAX = 9
-const BATCH_IDLE_WAIT = 2000
-const BATCH_MAX_WAIT = 10_000
-const NOTIFICATION_CAPACITY = 10
-const NOTIFICATION_INTERVAL = 1000
-const NOTIFICATION_TIMEOUT = 10_000
 
 class BlindPeering {
+  /**
+   * @param {import('hyperdht')} dht
+   * @param {import('corestore')} store
+   */
   constructor(dht, store, opts = {}) {
     const {
       suspended = false,
       wakeup = null,
-      keys = [],
-      blindPeers = [],
       gcWait = 2000,
-      pick = 2,
       relayThrough = null,
-      maxBatchMin = MAX_BATCH_MIN,
-      maxBatchMax = MAX_BATCH_MAX,
-      batchIdleWait = BATCH_IDLE_WAIT,
-      batchMaxWait = BATCH_MAX_WAIT,
       backoffResetWait = 10000,
       client = null,
-      notificationRateLimit = {
-        capacity: NOTIFICATION_CAPACITY,
-        interval: NOTIFICATION_INTERVAL,
-        timeout: NOTIFICATION_TIMEOUT
-      },
       skipConnectionMetadata = false
     } = opts
 
@@ -50,39 +31,16 @@ class BlindPeering {
     this.suspended = suspended
     this.closed = false
     this.wakeup = wakeup
+    /** @type {Map<string, BlindPeer>} */
     this.blindPeers = new Map()
 
-    // TODO: on a next major, get rid of all the work arounds
-    // for making it support both hyperdht-encoded addresses
-    // and straight keys (by always using hyperdht-encoded ones)
-    this.blindPeerInfos = null // set below
-
-    if (blindPeers?.length) this.setBlindPeers(blindPeers)
-    else this.setKeys(keys)
-
     this.gcWait = gcWait
-    this.pick = pick
     this.relayThrough = relayThrough
-    this.maxBatchMin = maxBatchMin
-    this.maxBatchMax = maxBatchMax
-    this.batchIdleWait = batchIdleWait
-    this.batchMaxWait = batchMaxWait
     this.backoffResetWait = backoffResetWait
-    this.notificationRate = {
-      limiter: notificationRateLimit
-        ? new BucketRateLimiter(
-            notificationRateLimit.capacity || NOTIFICATION_CAPACITY,
-            notificationRateLimit.interval || NOTIFICATION_INTERVAL
-          )
-        : null,
-      timeout: notificationRateLimit?.timeout || NOTIFICATION_TIMEOUT
-    }
 
     this.stats = {
-      addAutobase: 0,
       addCore: 0,
-      addCoresTx: 0,
-      notificationsTx: 0
+      addCoresTx: 0
     }
 
     this._handshake = {}
@@ -92,88 +50,71 @@ class BlindPeering {
       this._handshake.clientVersion = client?.version
       this._handshake.osPlatform = os.platform()
     }
-    this._gc = new Set()
+    /** @type {Map<BlindPeer, { idleTicks: number, uploaded: number }>} */
+    this._gc = new Map()
     this._gcTimer = null
     this._runGCBound = this._runGC.bind(this)
-    this._bumpBound = this.bump.bind(this)
 
-    this.dht.on('network-change', this._bumpBound)
+    this._onDhtClose = () => this.close()
+    this.dht.on('close', this._onDhtClose)
   }
 
-  bump() {
-    for (const peer of this.blindPeers.values()) {
-      peer.bump()
+  /**
+   * @param {import('hypercore')} core
+   * @param {Array<Buffer>} blindPeers Array of HyperDHTAddress encoded buffers
+   */
+  async addCore(core, blindPeers, { referrer = null, priority = undefined } = {}) {
+    const keys = this._getBlindPeerKeys(blindPeers)
+
+    await core.ready()
+    if (core.closing) return Promise.reject('Core closed')
+    if (this.closed) return Promise.reject('BlindPeering closed')
+
+    const peers = keys.map((x) => this._getBlindPeer(x))
+    try {
+      await Promise.all(peers.map((peer) => peer.addCore(core, { referrer, priority })))
+    } catch (err) {
+      const publicKey = b4a.toString(core.key, 'hex')
+      for (const peer of peers) peer.cores.get(publicKey)?.destroy(err)
+      throw err
     }
   }
 
-  get keys() {
-    return Array.from(this.blindPeerInfos.map(({ key }) => key))
-  }
-
-  setKeys(keys) {
-    this.setBlindPeers(keys.map((key) => ({ key })))
-  }
-
-  setBlindPeers(blindPeers) {
-    this.blindPeerInfos = toBlindPeerInfos(blindPeers)
-
-    const uniqueCores = new Map()
-    const uniqueBases = new Map()
-    for (const bp of this.blindPeers.values()) {
-      for (const [core, info] of bp.cores) {
-        uniqueCores.set(core, info)
-      }
-      for (const [base, info] of bp.bases) {
-        uniqueBases.set(base, info)
-      }
-    }
-
-    for (const [core, info] of uniqueCores) {
-      this.addCoreBackground(core, info)
-    }
-    for (const [base, info] of uniqueBases) {
-      this.addAutobaseBackground(base, info)
-    }
+  close() {
+    if (this.closed) return
+    this._stopGC()
+    this._gc = new Map()
+    this.dht.off('close', this._onDhtClose)
+    for (const peer of this.blindPeers.values()) peer.destroy('BlindPeering was closed')
+    this.closed = true
+    return Promise.resolve() // atm nothing async but keep signature
   }
 
   suspend() {
     this.suspended = true
     this._stopGC()
-
-    const suspending = []
-    for (const bp of this.blindPeers.values()) {
-      suspending.push(bp.suspend())
-    }
-    return Promise.all(suspending)
+    return Promise.all([...this.blindPeers.values()].map((peer) => peer.suspend()))
   }
 
   resume() {
     this.suspended = false
     if (this._gc.size) this._startGC()
-
-    const resuming = []
-    for (const bp of this.blindPeers.values()) {
-      resuming.push(bp.resume())
-    }
-    return Promise.all(resuming)
+    return Promise.all([...this.blindPeers.values()].map((peer) => peer.resume()))
   }
 
   _addGC(peer) {
-    peer.gc = 1
-
-    const empty = this._gc.size === 0
-    this._gc.add(peer)
-
-    if (empty) this._startGC()
+    if (this._gc.has(peer)) return
+    this._gc.set(peer, { idleTicks: 0, uploaded: getBlocksUploadedTo(peer.channel?.stream) })
+    if (!this.suspended) this._startGC()
   }
 
   _removeGC(peer) {
-    peer.gc = 0
     this._gc.delete(peer)
+    if (this._gc.size === 0) this._stopGC()
   }
 
   _startGC() {
-    if (this._gcTimer) clearInterval(this._gcTimer)
+    if (this._gcTimer) return
     this._gcTimer = setInterval(this._runGCBound, this.gcWait)
     if (this._gcTimer.unref) this._gcTimer.unref()
   }
@@ -184,216 +125,51 @@ class BlindPeering {
     this._gcTimer = null
   }
 
-  async addAutobase(
-    auto,
-    {
-      target,
-      referrer,
-      priority,
-      announce,
-      additionalViews,
-      pick = this.pick,
-      keys = null,
-      blindPeers = null
-    } = {}
-  ) {
-    const mirrors = this._getMirrors(blindPeers, keys)
-
-    await auto.ready()
-    if (auto.closing || this.closed) return
-
-    if (!target) target = auto.wakeupCapability.key
-    if (!referrer) referrer = target
-
-    const all = []
-
-    for (const mirror of getClosestMirrorList(target, mirrors, pick)) {
-      const peer = this._getBlindPeer(mirror.encodedKey)
-      peer.addAutobase(auto, { target, referrer, priority, announce, additionalViews, pick })
-      all.push(peer)
-    }
-
-    for (const peer of all) await peer.connecting
-  }
-
   _runGC() {
-    const close = []
-    for (const peer of this._gc) {
-      const uploaded = peer.channel ? getBlocksUploadedTo(peer.channel.stream) : 0
-      if (uploaded !== peer.uploaded) {
-        peer.uploaded = uploaded
-        peer.gc = peer.gc < 2 ? 1 : peer.gc - 1
-        continue
+    for (const [peer, state] of this._gc) {
+      const uploaded = getBlocksUploadedTo(peer.channel?.stream)
+      if (uploaded !== state.uploaded) {
+        state.uploaded = uploaded
+        state.idleTicks = 0
+      } else if (++state.idleTicks >= 3) {
+        this._removeGC(peer)
+        this.blindPeers.delete(peer.key)
+        peer.destroy('Garbage collected')
       }
-      peer.gc++
-      // 10 strikes is ~4-8s of inactivity
-      if (peer.gc >= 4) close.push(peer)
     }
-
-    for (const peer of close) {
-      const id = b4a.toString(peer.remotePublicKey, 'hex')
-      this.blindPeers.delete(id)
-      peer.destroy()
-      this._gc.delete(peer)
-    }
-
-    if (this._gc.size === 0) this._stopGC()
   }
 
-  _getMirrors(blindPeers, keys) {
-    if (blindPeers) return toBlindPeerInfos(blindPeers)
-    if (keys) return toBlindPeerInfos(keys.map((key) => ({ key })))
-    return this.blindPeerInfos
-  }
-
-  _getBlindPeer(encodedKey) {
-    const id = b4a.toString(encodedKey, 'hex')
-    let peer = this.blindPeers.get(id)
+  /**
+   * @returns {BlindPeer}
+   */
+  _getBlindPeer(decodedBlindPeer) {
+    let peer = this.blindPeers.get(decodedBlindPeer.key)
     if (peer) return peer
-    peer = new BlindPeer(this, encodedKey, { backoffResetWait: this.backoffResetWait })
-    this.blindPeers.set(id, peer)
+    peer = new BlindPeer(this, decodedBlindPeer.key, decodedBlindPeer.encodedKey, {
+      backoffResetWait: this.backoffResetWait
+    })
+    this.blindPeers.set(decodedBlindPeer.key, peer)
     return peer
   }
 
-  addAutobaseBackground(auto, opts) {
-    this.addAutobase(auto, opts).catch(safetyCatch)
-  }
-
-  async addCore(
-    core,
-    { target, referrer, priority, announce, pick = this.pick, keys = null, blindPeers = null } = {}
-  ) {
-    const mirrors = this._getMirrors(blindPeers, keys)
-
-    await core.ready()
-    if (core.closing || this.closed) return
-
-    if (!target) target = core.key
-
-    const all = []
-
-    for (const mirror of getClosestMirrorList(target, mirrors, pick)) {
-      const peer = this._getBlindPeer(mirror.encodedKey)
-      peer.addCore(core, { target, referrer, priority, announce, pick })
-      all.push(peer)
-    }
-
-    for (const peer of all) await peer.connecting
-  }
-
-  addCoreBackground(core, opts) {
-    this.addCore(core, opts).catch(safetyCatch)
-  }
-
-  async sendNotification(
-    core,
-    {
-      roomKey = null,
-      roomDiscoveryKey = null,
-      index = null,
-      upgradeLength = null,
-      target = null,
-      keys = null,
-      blindPeers = null,
-      extra = null,
-      appId = null
-    } = {}
-  ) {
-    await this._waitNotificationRateLimit()
-
-    const mirrors = this._getMirrors(blindPeers, keys)
-
-    await core.ready()
-    if (core.closing || this.closed) return
-
-    roomKey ??= core.key
-    roomDiscoveryKey ??= hcCrypto.discoveryKey(roomKey)
-    target ??= core.key
-    index ??= core.length - 1
-
-    const request = {
-      block: {
-        key: core.key,
-        index
-      },
-      destination: {
-        key: roomKey,
-        discoveryKey: roomDiscoveryKey
-      },
-      extra,
-      appId,
-      upgradeLength
-    }
-
-    const closestMirrors = getClosestMirrorList(target, mirrors, this.pick)
-    const peers = closestMirrors.map((mirror) => this._getBlindPeer(mirror.encodedKey))
-    // shuffle peers for random selection, giving priority to connected ones
-    const sortedPeers = peers
-      .map((peer) => ({ peer, rand: Math.random() }))
-      .sort((lhs, rhs) => {
-        if (lhs.peer.connected === rhs.peer.connected) return rhs.rand - lhs.rand
-        if (lhs.peer.connected) return -1
-        return 1
-      })
-      .map(({ peer }) => peer)
-
-    const errors = []
-    for (const peer of sortedPeers) {
-      try {
-        await peer.sendNotification(request)
-        return
-      } catch (e) {
-        if (this.closed) return
-        safetyCatch(e)
-        errors.push(e)
-      }
-    }
-    throw new AggregateError(errors, 'No peers available')
-  }
-
-  sendNotificationBackground(core, opts) {
-    this.sendNotification(core, opts).catch(safetyCatch)
-  }
-
-  async _waitNotificationRateLimit() {
-    if (!this.notificationRate.limiter) return
-
-    let timer
-    const totalTimeoutAbort = new Promise((_, reject) => {
-      timer = setTimeout(() => {
-        reject(new Error('Timed out'))
-      }, this.notificationRate.timeout)
-      timer.unref()
-    })
-    totalTimeoutAbort.catch(safetyCatch)
-
-    await this.notificationRate.limiter.wait({ abort: totalTimeoutAbort })
-    clearTimeout(timer)
-  }
-
-  close() {
-    if (this.closed) return
-    this._stopGC()
-    this._gc = new Set()
-    this.dht.off('network-change', this._bumpBound)
-    this.notificationRate.limiter?.destroy()
-    for (const peer of this.blindPeers.values()) peer.destroy()
-    this.blindPeers.clear()
-    this.closed = true
-    return Promise.resolve() // atm nothing async but keep signature
+  _getBlindPeerKeys(blindPeers) {
+    return blindPeers.map((encodedKey) => ({
+      key: b4a.toString(HyperDHTAddress.decode(encodedKey).key, 'hex'),
+      encodedKey
+    }))
   }
 }
 
 class BlindPeer {
-  constructor(peering, remotePublicKey, { backoffResetWait }) {
+  /**
+   * @param {BlindPeering} peering
+   */
+  constructor(peering, key, encodedAddress, { backoffResetWait }) {
     this.peering = peering
-    this.remotePublicKey = remotePublicKey
-    this.gc = 0
-    this.uploaded = 0
+    this.key = key
+    this.encodedAddress = encodedAddress
     this.connects = 0
-    this.pendingNotifications = 0
     this.cores = new Map()
-    this.bases = new Map()
 
     this.channel = null
     this.socket = null
@@ -401,11 +177,47 @@ class BlindPeer {
     this.connecting = null
     this.suspended = peering.suspended
     this.destroyed = false
-    this.needsFlush = false
     this.backoff = new Backoff(DEFAULT_BACKOFF)
     this.backoffResetWait = backoffResetWait
+  }
 
-    this._pendingFlushes = new Map()
+  async addCore(core, { referrer, priority }) {
+    const publicKey = b4a.toString(core.key, 'hex')
+    const current = this.cores.get(publicKey)
+    if (current) return await current.sending.promise
+
+    this.peering.stats.addCore++
+
+    const info = {
+      core: core.session({ weak: true }),
+      args: { priority, referrer },
+      sending: { ...rrp(), connection: -1 },
+      response: null, // { connection, length, activated } of the latest response
+      retry: new Backoff(DEFAULT_BACKOFF),
+      destroyed: false,
+      destroy: (reason) => {
+        if (info.destroyed) return
+        info.destroyed = true
+        info.retry.destroy()
+        info.sending.reject(reason)
+        this.cores.delete(publicKey)
+        info.core.off('close', onclose)
+        info.core.close().catch(safetyCatch)
+        this._updateGC()
+      }
+    }
+    info.sending.promise.catch(noop)
+
+    const onclose = () => info.destroy('core closed')
+    info.core.on('close', onclose)
+
+    this.cores.set(publicKey, info)
+    this._updateGC()
+
+    this._backgroundConnect()
+    if (this.connected) this._flushCore(info)
+
+    return await info.sending.promise
   }
 
   async suspend() {
@@ -421,22 +233,12 @@ class BlindPeer {
     if (!this.suspended) return
     this.suspended = false
     this.backoff = new Backoff(DEFAULT_BACKOFF)
-    this.update()
-  }
-
-  bump({ force = false } = {}) {
-    if (this.suspended || this.destroyed) return
-    if (force && this.channel) this.channel.close()
-    else if (this.socket) this.socket.sendKeepAlive()
-    const backoff = this.backoff
-    this.backoff = new Backoff(DEFAULT_BACKOFF)
-    backoff.destroy()
-    this.update()
+    if (this.cores.size) this._backgroundConnect()
   }
 
   async connect() {
     if (this.connecting) return this.connecting
-    if (this.connected) return
+    if (this.connected || !this._active()) return
 
     this.connecting = this._connect()
 
@@ -452,25 +254,33 @@ class BlindPeer {
   }
 
   _active() {
-    return !this.destroyed && !this.suspended && !this.peering.dht.destroyed && this.hasRef()
+    return !this.destroyed && !this.suspended && this.hasRef()
+  }
+
+  hasRef() {
+    return this.cores.size > 0
+  }
+
+  _updateGC() {
+    if (this.destroyed) return
+    if (this.hasRef()) this.peering._removeGC(this)
+    else this.peering._addGC(this)
   }
 
   async _connect() {
     this.connects++
-    this.needsFlush = true
 
-    for (let runs = 0; this._active(); runs++) {
+    while (this._active()) {
       await this.backoff.run()
       if (!this._active()) break
 
-      const socket = this.peering.dht.connect(this.remotePublicKey, {
-        keyPair: this.peering.keyPair,
+      const socket = this.peering.dht.connect(this.encodedAddress, {
         relayThrough: this.peering.relayThrough
       })
 
       const channel = new BlindPeerMuxer(socket, {
         handshake: this.peering._handshake,
-        onclose: (remote) => {
+        onclose: () => {
           const connected = this.connected
           socket.destroy()
           this.connected = false
@@ -478,10 +288,10 @@ class BlindPeer {
         }
       })
 
-      // always set this so we can nuke it if we want
       this.socket = socket
       this.channel = channel
-      this.onstream(socket)
+      this.peering.store.replicate(socket)
+      this.peering.wakeup?.addStream(socket)
 
       await socket.opened
 
@@ -504,490 +314,70 @@ class BlindPeer {
       const stayedConnected = connectAttempt === this.connects
       if (stayedConnected) this.backoff.reset() // Otherwise the connection probably errored, so avoid reconnect loop
     }, this.backoffResetWait).unref()
-    this.update()
+
+    this._flush()
   }
 
-  hasRef() {
-    return this.cores.size + this.bases.size > 0 || this.pendingNotifications > 0
+  async _flushCore(info) {
+    const connection = this.connects
+    try {
+      const coresMessage = {
+        ...info.args,
+        cores: [{ key: info.core.key, length: info.core.length }]
+      }
+      info.sending.connection = connection
+      const response = await this._requestAddCores(coresMessage)
+      // response from an old connection, the new one re-sends
+      if (connection !== this.connects) return
+
+      const entry = response.cores.find((c) => b4a.equals(c.key, info.core.key))
+      info.response = { connection, length: entry.length, activated: entry.activated }
+      info.retry.reset()
+      info.sending.resolve()
+    } catch (err) {
+      if (info.destroyed) return
+      if (connection !== this.connects || this.suspended) {
+        // failed due to underlying connection changing or suspending
+        // so we do not reject, it will try again on new connection
+        return
+      }
+      if (isRecoverable(err)) {
+        await info.retry.run()
+        // a reconnect in the meantime already re-sent it
+        if (info.destroyed || !this.connected || connection !== this.connects) return
+        this._flushCore(info)
+        return
+      }
+      info.destroy(err)
+    }
   }
 
-  _flushCore(core, info) {
-    const batch = {
-      priority: info.priority,
-      referrer: info.referrer,
-      announce: info.announce,
-      cores: [],
-      visited: new Set()
-    }
-
-    addCore(batch, core.key, core.length)
-    info.flushed = this.connects
-    this._sendCores(batch)
-  }
-
-  _flushAutobase(auto, info, visited = new Set()) {
-    if (info.isBee && !info.views) {
-      info.flushed = this.connects
-      return
-    }
-
-    const viewBatch = {
-      priority: info.priority,
-      referrer: null,
-      announce: info.announce,
-      cores: info.views || [],
-      visited
-    }
-
-    const writerBatch = {
-      priority: info.priority,
-      referrer: info.referrer,
-      announce: info.announce,
-      cores: info.writers || [],
-      visited
-    }
-
-    if (!info.views) {
-      addViewCores(viewBatch, auto)
-      addWriterCores(writerBatch, auto, this.peering.maxBatchMin, this.peering.maxBatchMax)
-    }
-
-    info.flushed = this.connects
-
-    this._sendCores(writerBatch)
-    this._sendCores(viewBatch)
+  async _requestAddCores(message) {
+    this.peering.stats.addCoresTx++
+    return await this.channel.requestAddCores(message)
   }
 
   _flush() {
     if (!this.connected) return
 
-    this.needsFlush = false
-
-    const total = this.cores.size + this.bases.size
-
-    if (total > 1) this.channel.cork()
-
-    for (const [core, info] of this.cores) {
-      if (info.flushed === this.connects) continue
-      this._flushCore(core, info)
+    this.channel.cork()
+    for (const info of this.cores.values()) {
+      if (info.sending.connection !== this.connects) this._flushCore(info)
     }
-
-    for (const [auto, info] of this.bases) {
-      if (info.flushed === this.connects) continue
-      this._flushAutobase(auto, info)
-    }
-
-    if (total > 1) this.channel.uncork()
+    this.channel.uncork()
   }
 
-  _sendCores(batch) {
-    if (!batch.cores.length) return
-    this.channel.requestAddCores(batch).catch(safetyCatch) // TODO use this response for dedup
-    this.peering.stats.addCoresTx++
-  }
-
-  update() {
-    if (this.destroyed || this.suspended || this.peering.dht.destroyed) return
-
-    if (this.hasRef() && !this.connected) {
-      this._backgroundConnect()
-    }
-
-    if (this.connected && this.needsFlush) {
-      this._flush()
-    }
-
-    if (this.hasRef()) {
-      if (this.gc) this.peering._removeGC(this)
-    } else {
-      if (!this.gc) this.peering._addGC(this)
-    }
-  }
-
-  onstream(stream) {
-    this.peering.store.replicate(stream)
-    if (this.peering.wakeup) this.peering.wakeup.addStream(stream)
-  }
-
-  addCore(core, { target, referrer = null, priority = 0, announce = false, pick } = {}) {
-    let info = this.cores.get(core)
-    // We never override existing info if it already exists
-    // so the first addCore chooses all properties
-
-    if (info) {
-      // Handles an edge case when both sides have a corestore in passive mode,
-      // or core is in passive mode, and the core length changed,
-      // in which case we need to explicitly send a new request to make
-      // the blind-peer activate replication with us
-      if (core.length === info.lastAddedLength) return
-      const isReplicating = core.peers.some((peer) =>
-        b4a.equals(peer.remotePublicKey, this.remotePublicKey)
-      )
-      if (isReplicating) return // Normal case
-    } else {
-      info = {
-        priority,
-        announce,
-        referrer,
-        target,
-        pick,
-        flushed: 0,
-        lastAddedLength: core.length,
-        destroy: () => {
-          this.cores.delete(core)
-          this.update()
-          core.off('close', onclose)
-        }
-      }
-
-      this.cores.set(core, info)
-
-      const onclose = () => {
-        info.destroy()
-      }
-      core.on('close', onclose)
-    }
-
-    this.peering.stats.addCore++
-    info.lastAddedLength = core.length
-    if (this.connected) this._flushCore(core, info)
-
-    this.update()
-  }
-
-  addAutobase(auto, { target, referrer = null, priority = 1, announce = false, pick } = {}) {
-    if (this.bases.has(auto)) return
-    this.peering.stats.addAutobase++
-
-    const info = {
-      priority,
-      announce,
-      referrer,
-      target,
-      pick,
-      isBee: !auto.core,
-      views: null,
-      writers: null,
-      flushed: 0,
-      flushedWriterBatch: false,
-      flushTimeout: null,
-      maxTimeout: null,
-      cleanup: () => {
-        this._pendingFlushes.delete(auto)
-        clearTimeout(info.flushTimeout)
-        clearTimeout(info.maxTimeout)
-        auto.off('writer', onwriter)
-      }
-    }
-    info.destroy = () => {
-      info.cleanup() // We can't reasonably flush anymore: no guarantees on core lengths etc of closed cores
-      this.bases.delete(auto)
-      this.update()
-      auto.off('close', onclose)
-      auto.off('appending', onappending)
-      auto.off('anchor', onanchor)
-      auto.core?.off('migrate', onmigrate)
-    }
-
-    this.bases.set(auto, info)
-
-    const visited = new Set() // to avoid duplicates when sending the writer batch
-    const writers = new Set()
-    const pendingWriters = new Set()
-
-    let recursive = false // true once a recursive cores call has finished
-    let bumps = 0
-
-    const queueFlush = () => {
-      clearTimeout(info.flushTimeout)
-      info.flushTimeout = setTimeout(flushWriterBatch, this.peering.batchIdleWait)
-    }
-
-    const flushOrUpdate = () => {
-      if (this.connected) {
-        this._flushAutobase(auto, info, visited)
-      } else {
-        this.update()
-      }
-    }
-
-    const onanchor = (anchor, link) => {
-      if (auto.local && auto.local.key && b4a.equals(auto.local.key, link.key)) {
-        pendingWriters.add(b4a.toString(anchor.key, 'hex'))
-        queueFlush()
-      }
-    }
-
-    const onwriter = (w) => {
-      // if it's a static core we must queue now for flushing cause no one else will
-      if (isStaticCore(w.core)) {
-        pendingWriters.add(b4a.toString(w.core.key, 'hex'))
-        queueFlush()
-        return
-      }
-      if (!info.isBee) queueFlush()
-    }
-
-    const onclose = () => {
-      info.destroy()
-    }
-
-    const bump = async () => {
-      bumps++
-
-      while (!this.peering.closed && bumps === 1) {
-        try {
-          const cores = await auto.cores({
-            wait: true,
-            all: true,
-            local: true,
-            recursive,
-            timeout: recursive ? 10_000 : 0
-          })
-
-          await oncores(cores)
-
-          if (!this.peering.closed && !recursive && (await auto.isLocalTrusted?.())) {
-            const rcores = await auto.cores({
-              wait: true,
-              all: true,
-              local: true,
-              recursive: true,
-              timeout: 10_000
-            })
-
-            await oncores(rcores)
-            recursive = true
-          }
-        } catch (err) {
-          safetyCatch(err)
-        }
-
-        if (bumps === 1) break
-        bumps = 1
-      }
-
-      if (bumps === 1) bumps = 0
-    }
-
-    const oncores = async (cores) => {
-      if (this.peering.closed) return
-
-      let updated = false
-
-      for (const key of cores.views) {
-        const size = visited.size
-        const id = b4a.toString(key, 'hex')
-        visited.add(id)
-        if (visited.size !== size) updated = true
-      }
-      for (const key of cores.writers) {
-        const size = visited.size
-        const id = b4a.toString(key, 'hex')
-        visited.add(id)
-        if (visited.size !== size) updated = true
-      }
-
-      for (const id of pendingWriters) {
-        const size = visited.size
-        visited.add(id)
-        if (visited.size === size) continue
-        updated = true
-        const key = b4a.from(id, 'hex')
-        cores.writers.push(key)
-      }
-
-      pendingWriters.clear()
-      if (!updated) return
-
-      const storage = this.peering.store.storage
-      const settings = { auth: false, head: true, hints: false }
-      const viewInfo = await storage.getInfos(cores.views.map(hcCrypto.discoveryKey), settings)
-      const writerInfo = await storage.getInfos(cores.writers.map(hcCrypto.discoveryKey), settings)
-      if (this.peering.closed) return
-
-      info.views = []
-      info.writers = []
-
-      for (let i = 0; i < viewInfo.length; i++) {
-        const head = viewInfo[i] ? viewInfo[i].head : null
-        info.views.push({ key: cores.views[i], length: head ? head.length : 0 })
-      }
-      for (let i = 0; i < writerInfo.length; i++) {
-        const head = writerInfo[i] ? writerInfo[i].head : null
-        info.writers.push({ key: cores.writers[i], length: head ? head.length : 0 })
-      }
-
-      flushOrUpdate()
-    }
-
-    const onmigrate = () => {
-      // TODO: cleanly
-      // Context: the views have not yet rotated after 'migrate' triggers. For that, we need to wait for the 'reboot' event.
-      // But 'reboot' is emitted for more reasons than just migration, so directly listening on it overtriggers.
-      // This hack makes it so that in practice we only flush after the reboot
-      setTimeout(() => {
-        if (this.peering.closed) return
-        if (auto.closed) return
-
-        if (info.isBee) {
-          bump()
-          return
-        }
-
-        flushOrUpdate()
-      }, 500).unref()
-    }
-
-    const flushWriterBatch = () => {
-      if (this.destroyed) return
-
-      if (info.isBee) {
-        bump()
-      } else {
-        if (info.flushedWriterBatch) return
-        info.flushedWriterBatch = true
-        info.cleanup()
-        flushOrUpdate()
-      }
-    }
-
-    auto.on('appending', onappending)
-    auto.on('close', onclose)
-
-    if (info.isBee) {
-      bump()
-    } else {
-      auto.core.on('migrate', onmigrate)
-    }
-
-    if (this.connected) {
-      // TODO: look into passing visited for the not-connected case (to dedup writers for that case too)
-      this._flushAutobase(auto, info, visited)
-    }
-
-    if (!info.isBee) {
-      // Optimisation: schedule a second flush for any additional writer cores we discover
-      // Note: we only do this once. Writers appearing later need to be added by others
-      this._pendingFlushes.set(auto, info)
-      info.maxTimeout = setTimeout(flushWriterBatch, this.peering.batchMaxWait)
-      info.flushTimeout = null
-    }
-
-    auto.on('writer', onwriter)
-    auto.on('anchor', onanchor)
-
-    this.update()
-
-    function onappending(batch) {
-      const last = batch[batch.length - 1]
-      if (last.trusted && last.trusted.length > 0) {
-        const id = b4a.toString(last.trusted[0].key, 'hex')
-        if (writers.has(id)) return
-        writers.add(id)
-        onmigrate()
-      }
-    }
-  }
-
-  async sendNotification(request) {
-    this.pendingNotifications++
-    this.update()
-    try {
-      if (!this.connected) {
-        // Don’t wait for the full retry duration. Fail fast so the caller can switch to another blind-peer
-        let timeout = null
-
-        try {
-          await Promise.race([
-            this.connect(),
-            new Promise((resolve, reject) => {
-              timeout = setTimeout(() => {
-                reject(new Error('Timed out'))
-              }, 5_000)
-              timeout.unref()
-            })
-          ])
-        } finally {
-          clearTimeout(timeout)
-        }
-      }
-      if (!this.connected) throw new Error('Could not connect')
-      await this.channel.requestSendNotification(request)
-      this.peering.stats.notificationsTx++
-    } finally {
-      this.pendingNotifications--
-      this.update()
-    }
-  }
-
-  destroy() {
+  destroy(reason) {
     this.destroyed = true
-    for (const info of this.cores.values()) info.destroy()
-    for (const info of this.bases.values()) info.destroy()
+    for (const info of this.cores.values()) info.destroy(reason)
     this.backoff.destroy()
     if (this.channel) this.channel.close()
     if (this.socket) this.socket.destroy()
   }
 }
 
-module.exports = BlindPeering
-
-function addWriterCores(batch, auto, maxBatchMin, maxBatchMax) {
-  addCore(batch, auto.local.key, auto.local.length)
-
-  const overflow = []
-  const priorityOverflow = []
-  for (const writer of auto.activeWriters) {
-    // remoteContiguousLength === 0 means no peer we ever met acknowledged they have the first block
-    if (
-      isStaticCore(writer.core) ||
-      writer.core.remoteContiguousLength === 0 ||
-      batch.cores.length < maxBatchMin
-    ) {
-      addCore(batch, writer.core.key, writer.core.length)
-    } else {
-      // No peer we ever met acknowledged they have all blocks (meaning blind peer needs to download it)
-      if (writer.core.length > writer.core.remoteContiguousLength) {
-        priorityOverflow.push(writer.core)
-      } else {
-        overflow.push(writer.core)
-      }
-    }
-  }
-
-  for (let i = 0; i < priorityOverflow.length && batch.cores.length < maxBatchMax; i++) {
-    const next = i + Math.floor(Math.random() * (priorityOverflow.length - i))
-    const core = priorityOverflow[next]
-    addCore(batch, core.key, core.length)
-    priorityOverflow[next] = priorityOverflow[i]
-  }
-
-  for (let i = 0; i < overflow.length && batch.cores.length < maxBatchMax; i++) {
-    const next = i + Math.floor(Math.random() * (overflow.length - i))
-    const core = overflow[next]
-    addCore(batch, core.key, core.length)
-    overflow[next] = overflow[i]
-  }
-}
-
-function addViewCores(batch, auto) {
-  for (const view of auto.views()) {
-    addCore(batch, view.key, view.signedLength)
-  }
-}
-
-function addCore(batch, key, length) {
-  const id = b4a.toString(key, 'hex')
-
-  if (batch.visited.has(id)) return
-  batch.visited.add(id)
-
-  batch.cores.push({ key, length })
-}
-
-function isStaticCore(core) {
-  return !!core.manifest && core.manifest.signers.length === 0
+function isRecoverable(err) {
+  return err?.code === 'RATE_LIMITED' || err?.code === 'REQUEST_TIMEOUT'
 }
 
 function getBlocksUploadedTo(stream) {
@@ -1000,47 +390,6 @@ function getBlocksUploadedTo(stream) {
   return uploadedTotal
 }
 
-function getClosestMirrorList(key, list, n) {
-  if (!list || !list.length) return []
+function noop() {}
 
-  if (n > list.length) n = list.length
-
-  const usedGroups = new Set()
-
-  for (let i = 0; i < n; i++) {
-    let current = null
-    for (let j = i; j < list.length; j++) {
-      if (usedGroups.has(list[j].group)) continue
-      const next = xorDistance(list[j].key, key)
-      if (current && xorDistance.gt(next, current)) continue
-      const tmp = list[i]
-      list[i] = list[j]
-      list[j] = tmp
-      current = next
-    }
-    if (current === null) {
-      // Every remaining peer is from a used group, clear so we keep balancing across groups
-      usedGroups.clear()
-      i--
-      continue
-    }
-    if (list[i].group) usedGroups.add(list[i].group)
-  }
-
-  return list.slice(0, n)
-}
-
-function decodeKey(encodedKey) {
-  // Ensure its a buffer
-  encodedKey = b4a.isBuffer(encodedKey) ? encodedKey : ID.decode(encodedKey)
-
-  const { key } = HyperDHTAddress.decode(encodedKey)
-  return { key, encodedKey }
-}
-
-function toBlindPeerInfos(blindPeers) {
-  return blindPeers.map((blindPeer) => {
-    const { key, encodedKey } = decodeKey(blindPeer.key)
-    return { key, encodedKey, group: blindPeer.group }
-  })
-}
+module.exports = BlindPeering

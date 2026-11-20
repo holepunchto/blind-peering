@@ -1,0 +1,439 @@
+const setupTestnet = require('hyperdht/testnet')
+const HyperDHT = require('hyperdht')
+const Corestore = require('corestore')
+const tmpDir = require('test-tmp')
+const { once } = require('events')
+const b4a = require('b4a')
+const crypto = require('hypercore-crypto')
+const Client = require('../../index.js')
+const BlindPeerMuxer = require('blind-peer-muxer')
+const Hyperswarm = require('hyperswarm')
+const Autobase = require('autobase')
+const Autobee = require('autobee')
+const ProtomuxRPC = require('protomux-rpc')
+const { ADMIN_CHANNEL_ID } = require('blind-peer-encodings')
+const BlindPushGateway = require('blind-push-gateway')
+const BlindPeer = require('blind-peer')
+
+const DEBUG = false
+let clientCounter = 0 // For clean teardown order
+
+const clientOpts = { batchIdleWait: 250, batchMaxWait: 1000 }
+
+async function getTestnet(t) {
+  const testnet = await setupTestnet()
+  t.teardown(
+    async () => {
+      await testnet.destroy()
+    },
+    { order: Infinity }
+  )
+
+  return testnet
+}
+
+async function setupCoreHolder(t, bootstrap, { active } = {}) {
+  const { swarm, store } = await setupPeer(t, bootstrap, { active })
+
+  const core = store.get({ name: 'core' })
+  await core.append('Block 0')
+  await core.append('Block 1')
+  swarm.join(core.discoveryKey)
+
+  return { swarm, store, core }
+}
+
+function createClient(t, dht, store, opts) {
+  const client = new Client(dht, store, opts)
+  t.teardown(async () => await client.close())
+  return client
+}
+
+async function loadAutobase(
+  t,
+  store,
+  autobaseBootstrap = null,
+  { addIndexers = true, namespace = 'base', autobaseOpts = {} } = {}
+) {
+  const open = (store) => {
+    return store.get('view', { valueEncoding: 'json' })
+  }
+
+  const apply = async (batch, view, base) => {
+    for (const { value } of batch) {
+      if (value.add) {
+        const key = b4a.from(value.add, 'hex')
+        await base.addWriter(key, { indexer: addIndexers })
+        continue
+      }
+
+      if (view) await view.append(value)
+    }
+  }
+
+  const base = new Autobase(store.namespace(namespace), autobaseBootstrap, {
+    open,
+    apply,
+    valueEncoding: 'json',
+    ackInterval: 10,
+    ackThreshold: 0,
+    ...autobaseOpts
+  })
+  await base.ready()
+  t.teardown(
+    async () => {
+      if (!base.closing) await base.update()
+      await base.close()
+    },
+    { order: -1 }
+  )
+  return { base }
+}
+
+async function loadAutobee(t, store, key = null) {
+  async function apply(nodes, view, host) {
+    for (const node of nodes) {
+      const op = JSON.parse(node.value)
+
+      if (op.addWriter) host.addWriter(op.addWriter)
+      if (op.removeWriter) host.removeWriter(op.removeWriter)
+
+      const w = view.write()
+      w.tryPut(Buffer.from('latest'), node.value)
+      await w.flush()
+    }
+  }
+
+  const bee = new Autobee(store.namespace('autobee'), key, {
+    isTrusted: (key) => true,
+    mostRecentTrusted: () => ({ key: bee.local.key, length: bee.local.length }),
+    apply
+  })
+  t.teardown(async () => await bee.close())
+  await bee.ready()
+
+  return { bee }
+}
+
+async function setupBlindPeer(
+  t,
+  bootstrap,
+  {
+    storage,
+    maxBytes,
+    enableGc,
+    trustedPubKeys,
+    routerKey,
+    routerPoolOpts,
+    replicationLagThreshold,
+    topK,
+    activeCorestore,
+    pushGatewayKeys,
+    pushGatewayPoolOpts,
+    notificationTimeout,
+    notificationErrorSnapshotDelay,
+    retryRecordLookupTimeout,
+    perReferrerRateLimitParams,
+    metricsOpts
+  } = {}
+) {
+  if (!storage) storage = await tmpDir(t)
+
+  const peer = new BlindPeer(storage, {
+    bootstrap,
+    maxBytes,
+    enableGc,
+    trustedPubKeys,
+    routerKey,
+    routerPoolOpts,
+    pushGatewayKeys,
+    pushGatewayPoolOpts,
+    //wakeupGcTickTime: 100,
+    replicationLagThreshold,
+    topK,
+    activeCorestore,
+    notificationTimeout,
+    notificationErrorSnapshotDelay,
+    retryRecordLookupTimeout,
+    perReferrerRateLimitParams,
+    metricsOpts
+  })
+
+  const order = clientCounter++
+  t.teardown(
+    async () => {
+      await peer.close()
+    },
+    { order }
+  )
+
+  await peer.listen()
+  if (DEBUG) {
+    peer.swarm.on('connection', () => {
+      console.log('Blind peer connection opened')
+    })
+  }
+
+  return { blindPeer: peer, storage }
+}
+
+async function initBlindPeer(t, bootstrap, opts) {
+  const result = await setupBlindPeer(t, bootstrap, opts)
+  await result.blindPeer.listen()
+  await result.blindPeer.swarm.flush()
+  return result
+}
+
+async function initBlindPeers(t, bootstrap, amount) {
+  const blindPeers = []
+
+  for (let i = 0; i < amount; i++) {
+    const { blindPeer } = await initBlindPeer(t, bootstrap)
+    blindPeers.push(blindPeer)
+  }
+
+  return blindPeers
+}
+
+async function getBlindPeerStoredLength(blindPeer, key) {
+  const [info] = await blindPeer.store.storage.getInfos([crypto.discoveryKey(key)])
+  return info?.head?.length ?? 0
+}
+
+function waitUntilStoredOn(t, blindPeers, core, count) {
+  return waitUntil(
+    t,
+    async () => {
+      const lengths = await Promise.all(
+        blindPeers.map((blindPeer) => getBlindPeerStoredLength(blindPeer, core.key))
+      )
+      return lengths.filter((length) => length === core.length).length === count
+    },
+    `the core is stored on ${count} blind peers`
+  )
+}
+
+async function setupAdminClient(t, { bootstrap = null, serverPublicKey, keyPair }) {
+  const dht = new HyperDHT({ bootstrap, keyPair })
+  t.teardown(() => dht.destroy(), { order: 4000 })
+
+  const stream = dht.connect(serverPublicKey)
+  stream.on('error', () => {})
+  await stream.opened
+
+  const rpc = new ProtomuxRPC(stream, {
+    id: ADMIN_CHANNEL_ID,
+    valueEncoding: null
+  })
+
+  await rpc.fullyOpened()
+
+  return rpc
+}
+
+async function setupPushGateway(t, bootstrap, { send } = {}) {
+  const sentMessages = []
+  const dht = new HyperDHT({ bootstrap })
+  const router = new ProtomuxRPCRouter()
+  // push service stub to simulate real fcm send
+  const pushServiceStub = {
+    send: async (message) => {
+      if (send) await send(message)
+      sentMessages.push(message)
+    }
+  }
+  const gateway = new BlindPushGateway(dht, router, pushServiceStub)
+
+  t.teardown(
+    async () => {
+      await gateway.close()
+      await dht.destroy()
+    },
+    { order: clientCounter++ }
+  )
+
+  await gateway.ready()
+
+  return { gateway, sentMessages }
+}
+
+async function setupPeer(t, bootstrap, { active } = {}) {
+  const storage = await tmpDir(t)
+  const swarm = new Hyperswarm({ bootstrap })
+  const store = new Corestore(storage, { active })
+
+  const order = clientCounter++
+  swarm.on('connection', (c) => {
+    if (DEBUG) console.log('(CORE HOLDER) connection opened')
+    store.replicate(c)
+    c.on('error', (e) => {
+      if (DEBUG) console.warn(`Swarm error: ${e.stack}`)
+    })
+  })
+  t.teardown(
+    async () => {
+      await swarm.destroy()
+      await store.close()
+    },
+    { order }
+  )
+
+  return { swarm, store }
+}
+
+async function setupMuxer(t, swarm, store, publicKey, { replicate = true } = {}) {
+  const stream = swarm.dht.connect(publicKey)
+  if (replicate) store.replicate(stream)
+
+  const muxer = new BlindPeerMuxer(stream)
+  const order = clientCounter++
+  t.teardown(
+    () => {
+      muxer.close()
+      stream.destroy()
+    },
+    { order }
+  )
+
+  await muxer.channel.fullyOpened()
+
+  return muxer
+}
+
+async function setupAutobaseHolder(t, bootstrap, autobaseBootstrap = null, autobaseOpts = {}) {
+  const { swarm, store } = await setupPeer(t, bootstrap)
+  const { wakeup, base } = await loadAutobase(t, store, autobaseBootstrap, { autobaseOpts })
+  swarm.join(base.discoveryKey)
+
+  return { swarm, store, base, wakeup }
+}
+
+async function setupAutobeeHolder(t, bootstrap, key = null) {
+  const { swarm, store } = await setupPeer(t, bootstrap)
+  const { bee } = await loadAutobee(t, store, key)
+  swarm.join(bee.discoveryKey)
+
+  return { swarm, store, bee }
+}
+
+let writerI
+
+async function getWakeupPeer(t, bootstrap, indexer, blindPeer) {
+  const { store, swarm } = await setupPeer(t, bootstrap)
+
+  const { base } = await loadAutobase(t, store, indexer.local.key, { addIndexers: false })
+  swarm.join(base.discoveryKey)
+  await Promise.all([
+    indexer.append({ add: b4a.toString(base.local.key, 'hex') }),
+    once(base, 'writable')
+  ])
+
+  const nr = writerI++
+  await Promise.all([once(indexer, 'writer'), base.append(`Message from writer ${nr}`)])
+  const client = createClient(t, swarm.dht, store, {
+    ...clientOpts,
+    wakeup: base.wakeupProtocol,
+    keys: [blindPeer.publicKey]
+  })
+
+  return { client, base, store, swarm, wakeup: base.wakeupProtocol }
+}
+
+function waitForEvents(emitter, name, times) {
+  return new Promise((resolve) => {
+    const events = []
+    const onevent = (...args) => {
+      events.push(args)
+      if (events.length < times) return
+      emitter.off(name, onevent)
+      resolve(events)
+    }
+    emitter.on(name, onevent)
+  })
+}
+
+function sleep(delay = 1000) {
+  return new Promise((resolve) => setTimeout(resolve, delay))
+}
+
+async function poll(condition, timeout) {
+  const deadline = Date.now() + timeout
+  while (!(await condition())) {
+    if (Date.now() >= deadline) return false
+    await sleep(10)
+  }
+  return true
+}
+
+async function waitUntil(t, condition, message, { timeout = 10_000 } = {}) {
+  if (await poll(condition, timeout)) return true
+  t.fail(`timed out waiting until ${message}`)
+  return false
+}
+
+async function assertUntilOk(t, condition, message, { timeout = 10_000 } = {}) {
+  const ok = await poll(condition, timeout)
+  t.ok(ok, message)
+  return ok
+}
+
+async function assertUntilIs(t, actual, expected, message, { timeout = 10_000 } = {}) {
+  let value
+  const ok = await poll(async () => (value = await actual()) === expected, timeout)
+  t.is(value, expected, message)
+  return ok
+}
+
+async function runGc(blindPeer) {
+  // blind-peer uses a lock with debouncing
+  // so we keep trying to get the lock until it is available
+  while (true) if (await blindPeer.lock.lock()) break
+
+  try {
+    const [[result]] = await Promise.all([once(blindPeer, 'gc-done'), blindPeer._gc()])
+    return result
+  } finally {
+    blindPeer.lock.unlock()
+  }
+}
+
+async function waitForCoresDownloaded(blindPeer, cores) {
+  await Promise.all(
+    cores.map(async ({ key, length }) => {
+      const core = blindPeer.store.get({ key })
+      await core.ready()
+      while (core.contiguousLength < length) await once(core, 'download')
+      await core.close()
+    })
+  )
+  await blindPeer.flush()
+}
+
+module.exports = {
+  DEBUG,
+  clientOpts,
+  setupCoreHolder,
+  loadAutobase,
+  loadAutobee,
+  setupBlindPeer,
+  initBlindPeer,
+  initBlindPeers,
+  getBlindPeerStoredLength,
+  waitUntilStoredOn,
+  waitForCoresDownloaded,
+  runGc,
+  setupAdminClient,
+  setupPushGateway,
+  getTestnet,
+  setupPeer,
+  setupMuxer,
+  setupAutobaseHolder,
+  setupAutobeeHolder,
+  getWakeupPeer,
+  sleep,
+  waitForEvents,
+  waitUntil,
+  assertUntilOk,
+  assertUntilIs,
+  createClient
+}
