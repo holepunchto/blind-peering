@@ -291,7 +291,7 @@ class BlindPeering {
       roomKey = null,
       roomDiscoveryKey = null,
       index = null,
-      upgradeLength = null,
+      upgrade = null,
       target = null,
       keys = null,
       blindPeers = null,
@@ -304,7 +304,7 @@ class BlindPeering {
     const mirrors = this._getMirrors(blindPeers, keys)
 
     await core.ready()
-    if (core.closing || this.closed) return
+    if (core.closing || this.closed) return { length: 0 }
 
     roomKey ??= core.key
     roomDiscoveryKey ??= hcCrypto.discoveryKey(roomKey)
@@ -314,15 +314,15 @@ class BlindPeering {
     const request = {
       block: {
         key: core.key,
-        index
+        index,
+        upgrade
       },
       destination: {
         key: roomKey,
         discoveryKey: roomDiscoveryKey
       },
       extra,
-      appId,
-      upgradeLength
+      appId
     }
 
     const closestMirrors = getClosestMirrorList(target, mirrors, this.pick)
@@ -340,10 +340,10 @@ class BlindPeering {
     const errors = []
     for (const peer of sortedPeers) {
       try {
-        await peer.sendNotification(request)
-        return
+        const res = await peer.sendNotification(request)
+        return res ?? { length: 0 }
       } catch (e) {
-        if (this.closed) return
+        if (this.closed) return { length: 0 }
         safetyCatch(e)
         errors.push(e)
       }
@@ -913,8 +913,9 @@ class BlindPeer {
         }
       }
       if (!this.connected) throw new Error('Could not connect')
-      await this.channel.requestSendNotification(request)
+      const response = await this.channel.requestSendNotification(request)
       this.peering.stats.notificationsTx++
+      return response
     } finally {
       this.pendingNotifications--
       this.update()

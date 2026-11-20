@@ -45,11 +45,15 @@ Add a Hypercore to a blind peer.
 
 Same as `addCore`, but is sync (it runs in the background).
 
-#### `await blindPeering.sendNotification(core, { roomKey = core.key, roomDiscoveryKey, index = core.length - 1, target = core.key, ...opts })`
+#### `const { length } = await blindPeering.sendNotification(core, { roomKey = core.key, roomDiscoveryKey, index = core.length - 1, upgrade = null, target = core.key, ...opts })`
 
 Ask the closest blind peer to create a `blind-push` notification for `core` and forward it to its configured push gateway.
 
 This requires that the target blind peer already has the core or autobase attached for replication.
+
+Returns `{ length }`, where `length` is the blind peer's core length when the notification proof was generated. This is the expected length of the receiver's core after it receives and applies the notification.
+
+Save the returned length and pass it as `upgrade: { start: 0, length }` when sending the next notification. This lets the blind peer build a proof that the receiver can apply from its expected previous core length. Omitting `upgrade` requests a full upgrade. A returned length of `0` means no usable notification length is available.
 
 #### `blindPeering.sendNotificationBackground(core, opts)`
 
