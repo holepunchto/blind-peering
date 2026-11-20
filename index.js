@@ -31,6 +31,7 @@ class BlindPeering {
       gcWait = 2000,
       pick = 2,
       relayThrough = null,
+      keyPair = null,
       maxBatchMin = MAX_BATCH_MIN,
       maxBatchMax = MAX_BATCH_MAX,
       batchIdleWait = BATCH_IDLE_WAIT,
@@ -63,6 +64,7 @@ class BlindPeering {
     this.gcWait = gcWait
     this.pick = pick
     this.relayThrough = relayThrough
+    this.keyPair = keyPair
     this.maxBatchMin = maxBatchMin
     this.maxBatchMax = maxBatchMax
     this.batchIdleWait = batchIdleWait
